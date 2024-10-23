@@ -332,7 +332,6 @@ class DualControl(object):
 
 
         if self._use_steering_wheel:
-
             # initialize steering wheel
             pygame.joystick.init()
 
@@ -345,19 +344,11 @@ class DualControl(object):
 
             self._parser = ConfigParser()
             self._parser.read('wheel_config.ini')
-            self._steer_idx = int(
-            self._parser.get('G29 Racing Wheel', 'steering_wheel'))
-            self._throttle_idx = int(
-            self._parser.get('G29 Racing Wheel', 'throttle'))
+            self._steer_idx = int(self._parser.get('G29 Racing Wheel', 'steering_wheel'))
+            self._throttle_idx = int(self._parser.get('G29 Racing Wheel', 'throttle'))
             self._brake_idx = int(self._parser.get('G29 Racing Wheel', 'brake'))
             self._reverse_idx = int(self._parser.get('G29 Racing Wheel', 'reverse'))
-            self._handbrake_idx = int(
-            self._parser.get('G29 Racing Wheel', 'handbrake'))
-            # self._steer_idx = 0
-            # self._throttle_idx = 5
-            # self._brake_idx = 2
-            # self._reverse_idx = 4
-            # self._handbrake_idx = 5
+            self._handbrake_idx = int(self._parser.get('G29 Racing Wheel', 'handbrake'))
 
     def parse_events(self, world, clock):
         for event in pygame.event.get():
@@ -422,7 +413,8 @@ class DualControl(object):
         if not self._autopilot_enabled:
             if isinstance(self._control, carla.VehicleControl):
                 self._parse_vehicle_keys(pygame.key.get_pressed(), clock.get_time())
-                self._parse_vehicle_wheel()
+                if self._use_steering_wheel:
+                    self._parse_vehicle_wheel()
                 self._control.reverse = self._control.gear < 0
             elif isinstance(self._control, carla.WalkerControl):
                 self._parse_walker_keys(pygame.key.get_pressed(), clock.get_time())
