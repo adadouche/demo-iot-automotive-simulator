@@ -1,0 +1,687 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CARLA Simulator Ubuntu with NICE DCV (login as ubuntu)
+Metadata:
+  License:
+    Description: |
+      Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. SPDX-License-Identifier: MIT-0
+      Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so.
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Instance type
+        Parameters:
+          - ImageId
+          - instanceType
+      - Label:
+          default: EC2 configuration
+        Parameters:
+          - ec2Name
+      - Label:
+          default: EBS volume configuration
+        Parameters:
+          - volumeSize
+          - volumeType
+      - Label:
+          default: Biga configuration
+        Parameters:
+          - BigaAmiId
+          - BigaInstanceType
+Parameters:
+  instanceType:
+    Type: String
+    Description: Accelerated Instance Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/accelerated-computing-instances.html )
+    AllowedValues:
+      - g4dn.xlarge
+      - g4dn.2xlarge
+      - g4dn.4xlarge
+      - g4dn.8xlarge
+      - g4dn.12xlarge
+      - g4dn.16xlarge
+      - g5.xlarge
+      - g5.2xlarge
+      - g5.4xlarge
+      - g5.8xlarge
+      - g5.12xlarge
+      - g5.16xlarge
+    ConstraintDescription: Must contain valid instance type.
+    Default: g5.16xlarge
+  ec2Name:
+    Description: EC2 instance name
+    Type: String
+    Default: Ubuntu-CARLA-NICE-DCV
+  volumeType:
+    Type: String
+    Description: Volume Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html )
+    AllowedValues:
+      - gp2
+      - gp3
+    Default: gp3
+  volumeSize:
+    Type: Number
+    Description: Volume Size in GiBs (must be equal or larger than snapshot size)
+    Default: 40
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Ubuntu 20.04 (x86_64)
+    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+  BigaAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: The Biga ami image id
+  BigaInstanceType:
+    Type: String
+    Description: Instance type for the biga image
+    Default: t4g.micro
+  BigaInstanceName:
+    Type: String
+    Description: Name of Biga Instance
+    Default: Biga
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC"
+  VPCPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Private Subnet 1"
+  VPCPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Private Subnet 2"
+  VPCPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref VPC
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Public Subnet"
+  VPCInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Internet Gateway"
+  VPCInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref VPCInternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Public Route Table"
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref VPCInternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref VPCPublicSubnet
+  NatIP:
+    Type: AWS::EC2::EIP
+    DependsOn: VPC
+    Properties:
+      Domain: VPC
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatIP.AllocationId
+      SubnetId: !Ref VPCPublicSubnet
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Private Route Table"
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCPrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPCPrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  BigaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Traffic From/To Carla
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          Description: SSH
+          FromPort: "22"
+          ToPort: "22"      
+        - IpProtocol: tcp
+          Description: HTTP
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 91.169.31.0/24
+        - IpProtocol: tcp
+          Description: HTTPS
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 91.169.31.0/24
+        - IpProtocol: tcp
+          Description: tcp 8443
+          FromPort: "8443"
+          ToPort: "8443"
+          CidrIp: 91.169.31.0/24
+        - IpProtocol: udp
+          Description: udp 8443
+          FromPort: "8443"
+          ToPort: "8443"
+          CidrIp: 91.169.31.0/24
+        - IpProtocol: udp
+          Description: Ingress traffic (UDP) for ROS2
+          FromPort: "7400"
+          ToPort: "65400"
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: udp
+          Description: vCAN
+          FromPort: "3030"
+          ToPort: "3030"
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: udp
+          Description: Ingress multicast traffic (UDP)
+          FromPort: "0"
+          ToPort: "65535"
+          CidrIp: 10.0.0.0/16
+      SecurityGroupEgress:
+        - IpProtocol: all
+          Description: Egress multicast traffic (UDP)
+          FromPort: "0"
+          ToPort: "65535"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga Security Group"
+
+  Ec2InstanceCarlaIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: dcvLicensing
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::dcv-license.${AWS::Region}/*
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+
+  Ec2InstanceCarlaProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref Ec2InstanceCarlaIamRole
+
+  Ec2InstanceCarlaNetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref VPCPublicSubnet
+      Description: "Network interface for Ec2InstanceCarla"
+      GroupSet:
+        - !Ref BigaSecurityGroup
+
+  Ec2InstanceBigaNetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref VPCPublicSubnet
+      Description: "Network interface for Ec2InstanceBiga"
+      GroupSet:
+        - !Ref BigaSecurityGroup
+
+  Ec2InstanceCarla:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT90M
+    Metadata:
+      Comment: Install Desktop Environment
+      AWS::CloudFormation::Init:
+        # we could have used a single config set, but then commands will be executed alphabetically
+        configSets:
+          default:
+            - base-install
+            - awscli-install
+            - dcv-install-prerequisites
+            - dcv-install
+            - dcv-configure
+            - carla-install
+            - ros2-install
+            - firefox-install
+            - nvidia-install
+            - finalize-install
+        base-install:
+          commands:
+            base-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] base-install -> start" >> ~/my-cfn-init.log
+                sudo add-apt-repository ppa:deadsnakes/ppa -y
+                sudo apt-get update
+                sudo apt-get -q -y install python3 >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-dev >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-venv >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-distutils >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-pip >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-setuptools >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python-is-python3 >> ~/my-cfn-init.log
+                sudo apt-get -q -y install locales >> ~/my-cfn-init.log
+                sudo apt-get -q -y install software-properties-common >> ~/my-cfn-init.log
+
+                # https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-ubuntu.html#agent-install-ubuntu-tabs
+                sudo apt-get -q -y install wget >> ~/my-cfn-init.log
+                sudo apt-get -q -y install tmux >> ~/my-cfn-init.log
+                sudo apt-get -q -y install unzip >> ~/my-cfn-init.log
+                sudo apt-get -q -y install tar >> ~/my-cfn-init.log
+                sudo apt-get -q -y install curl >> ~/my-cfn-init.log
+                sudo apt-get -q -y install sed >> ~/my-cfn-init.log
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] base-install -> done" >> ~/my-cfn-init.log
+        awscli-install:
+          commands:
+            awscli-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] awscli-install -> start" >> ~/my-cfn-init.log
+                cd /tmp
+                rm -f /tmp/awscliv2.zip
+                if (uname -a | grep x86 1>/dev/null); then
+                  curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+                else
+                  curl https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
+                fi
+                unzip -q -o awscliv2.zip
+                sudo ./aws/install --update -b /usr/bin
+
+                echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> ~/.bashrc
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] awscli-install -> done" >> ~/my-cfn-init.log
+        dcv-install-prerequisites:
+          commands:
+            dcv-install-prerequisites:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install-prerequisites -> start" >> ~/my-cfn-init.log
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-prereq.html
+                sudo systemctl isolate graphical.target
+                sudo systemctl set-default graphical.target
+
+                sudo apt-get -q -y install ubuntu-desktop
+                sudo apt-get -q -y install gdm3
+                sudo apt-get -q -y install pulseaudio-utils
+                sudo apt-get -q -y install libssl1.1
+                sudo apt-get -q -y install mesa-utils
+                sudo apt-get -q -y install xserver-xorg-video-dummy
+
+                # resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
+                sudo apt-get -q -y install dpkg-dev
+
+                sudo pip3 install crudini
+                sudo crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
+
+                sudo dpkg-reconfigure gdm3
+                sudo systemctl restart gdm3
+
+                sudo DISPLAY=:0 XAUTHORITY=$(ps aux | grep "X.*\-auth" | grep -v grep | sed -n 's/.*-auth \([^ ]\+\).*/\1/p') glxinfo | grep -i "opengl.*version" >> ~/my-cfn-init.log
+
+                sudo nvidia-xconfig --preserve-busid --enable-all-gpus
+                sudo rm -rf /etc/X11/XF86Config*
+
+                sudo systemctl isolate multi-user.target && sudo systemctl isolate graphical.target
+                sudo dcvstartx & >> ~/my-cfn-init.log
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install-prerequisites -> done" >> ~/my-cfn-init.log
+        dcv-install:
+          commands:
+            dcv-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install -> start" >> ~/my-cfn-init.log
+                cd /tmp
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
+                wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
+                sudo gpg --import NICE-GPG-KEY  
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
+
+                rm -f /tmp/nice-dcv-*.tgz
+                if ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 22.04 1>/dev/null)); then
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                elif ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 18.04 1>/dev/null)); then
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                elif (cat /etc/os-release | grep 18.04 1>/dev/null); then
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
+                else
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                fi
+
+                sudo apt-get -q -y install ./nice-dcv-server_*.deb
+                sudo apt-get -q -y install ./nice-dcv-web-viewer_*.deb                
+                usermod -aG video dcv
+                sudo apt-get -q -y install ./nice-xdcv_*.deb
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install -> done" >> ~/my-cfn-init.log
+        dcv-configure:
+          commands:
+            dcv-configure:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-configure -> start" >> ~/my-cfn-init.log
+                sudo pip3 install crudini >> ~/my-cfn-init.log
+
+                sudo systemctl stop dcvserver
+
+                sudo cp /etc/dcv/dcv.conf /etc/dcv/dcv.conf.original
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/enable-quic.html
+                sudo crudini --set /etc/dcv/dcv.conf "security" "no-tls-strict" "true"
+
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "enable-quic-frontend" "false"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "quic-listen-endpoints=['0.0.0.0:8443', '[::]:8443']"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "quic-port" "8443"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints=['0.0.0.0:8443', '[::]:8443']"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
+                
+                # sudo crudini --set /etc/dcv/dcv.conf "session-management" "create-session" "false"
+                # sudo crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
+
+                # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
+                mkdir -p /home/ubuntu/DCV-Storage
+                chown -R ubuntu:ubuntu /home/ubuntu/DCV-Storage
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
+                sudo tee /opt/dcv-virtual-session.sh > /dev/null << EOF
+                #!/bin/bash
+                dcvUser=ubuntu
+                while true;
+                do
+                  if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
+                  then
+                    sleep 5
+                  else
+                    /usr/bin/dcv create-session demo --owner \$dcvUser --storage-root /home/\$dcvUser/DCV-Storage --type=virtual 
+                    /usr/bin/dcv list-sessions
+                  fi
+                done
+                EOF
+
+                sudo tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
+                [Unit]
+                Description=Create DCV virtual session for user ubuntu
+                After=default.target network.target
+                [Service]
+                ExecStart=/opt/dcv-virtual-session.sh
+                [Install]
+                WantedBy=default.target
+                EOF
+
+                sudo chmod +x /opt/dcv-virtual-session.sh
+
+                # text console: DCV virtual sessions only
+                sudo systemctl daemon-reload
+                sudo systemctl enable --now dcvserver
+                sudo systemctl enable --now dcv-virtual-session.service
+
+                sudo systemctl stop dcvserver
+                sudo systemctl stop dcv-virtual-session.service
+
+                sudo systemctl restart dcvserver
+                sudo systemctl restart dcv-virtual-session.service
+
+                sudo systemctl status dcvserver >> ~/my-cfn-init.log
+                sudo systemctl status dcv-virtual-session.service >> ~/my-cfn-init.log
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-configure -> done" >> ~/my-cfn-init.log
+        carla-install:
+          commands:
+            carla-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] carla-install -> start" >> ~/my-cfn-init.log
+
+                sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 1AF1527DE64CB8D9
+                sudo add-apt-repository -y "deb [arch=amd64] http://dist.carla.org/carla focal main"
+                sudo apt-get update
+
+                sudo apt-get -y install libomp5 carla-simulator
+
+                python -m ensurepip --upgrade
+                python -m venv ~/venv
+                source ~/venv/bin/activate
+                python -m pip install --upgrade pip
+                python -m pip install carla==0.9.13
+                python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+                sudo apt-get -y install can-utils socat linux-modules-extra-$(uname -r)
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] carla-install -> done" >> ~/my-cfn-init.log
+        ros2-install:
+          commands:
+            ros2-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ros2-install -> start" >> ~/my-cfn-init.log
+
+                sudo locale-gen en_US en_US.UTF-8
+                sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+                export LANG=en_US.UTF-8
+                sudo add-apt-repository universe
+                sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+                sudo apt update
+                sudo apt install -y ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ros2-install -> done" >> ~/my-cfn-init.log
+        firefox-install:
+          commands:
+            firefox-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] firefox-install -> start" >> ~/my-cfn-init.log
+
+                # install firefox browser
+                sudo apt-get -q -y install firefox
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] firefox-install -> done" >> ~/my-cfn-init.log
+        nvidia-install:
+          commands:
+            nvidia-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] nvidia-install -> start" >> ~/my-cfn-init.log
+
+                # Nvidia Drivers
+                sudo apt -q -y install ubuntu-drivers-common
+                sudo apt -q -y install $(nvidia-detector)
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] nvidia-install -> done" >> ~/my-cfn-init.log
+        finalize-install:
+          commands:
+            finalize-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] finalize-install -> start" >> ~/my-cfn-init.log
+
+                # install firefox browser
+                sudo apt-get -y autoremove
+
+                ps -edf | grep dcv >> ~/my-cfn-init.log
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] finalize -> done" >> ~/my-cfn-init.log
+
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref instanceType
+      IamInstanceProfile: !Ref Ec2InstanceCarlaProfile
+      Monitoring: true
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref Ec2InstanceCarlaNetworkInterface
+          DeviceIndex: "0"
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: !Ref volumeType
+            VolumeSize: !Ref volumeSize
+            DeleteOnTermination: true
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> start" >> ~/my-cfn-init.log
+
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> start" >> ~/my-cfn-init.log
+          # https://stackoverflow.com/questions/33370297/apt-get-update-non-interactive
+          export DEBIAN_FRONTEND=noninteractive
+          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          sudo apt-get update
+          sudo apt-get -q -y install python3 python3-dev python3-venv python3-distutils python3-pip python3-setuptools python-is-python3
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> done" >> ~/my-cfn-init.log
+              
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> start" >> ~/my-cfn-init.log
+          cd /tmp
+          # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/releasehistory-aws-cfn-bootstrap.html
+          wget -nv https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-31.tar.gz
+          tar -xvzf ./aws-cfn-bootstrap-py*
+          cd aws-cfn-bootstrap-2.0
+          sudo python3 setup.py build
+          sudo python3 setup.py install
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> done" >> ~/my-cfn-init.log
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> start" >> ~/my-cfn-init.log
+          # cfn-init
+          sudo cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> done" >> ~/my-cfn-init.log
+
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> start" >> ~/my-cfn-init.log
+          # cfn-init completed so signal success or not
+          sudo cfn-signal -e $? --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> done" >> ~/my-cfn-init.log
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> done" >> ~/my-cfn-init.log
+          sudo reboot
+      Tags:
+        - Key: Name
+          Value: !Ref ec2Name
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+
+  Ec2InstanceBiga:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref BigaAmiId
+      InstanceType: !Ref BigaInstanceType
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref Ec2InstanceBigaNetworkInterface
+          DeviceIndex: "0"
+      Tags:
+        - Key: Name
+          Value: !Ref BigaInstanceName
+
+Outputs:
+  InstanceID:
+    Description: EC2 Instance ID
+    Value: !Ref Ec2InstanceCarla
+  SSMsessionManager:
+    Description: SSM Session Manager login ("sudo passwd ubuntu" to change password)
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager/session-manager/${Ec2InstanceCarla}
+  DCVdownload:
+    Description: DCV client download
+    Value: https://download.nice-dcv.com
+  CARLAinstall:
+    Description: Command to download and install CARLA
+    Value: /home/ubuntu/install-carla
+  CARLApath:
+    Description: CARLA installation target path
+    Value: /opt/carla-simulator/
