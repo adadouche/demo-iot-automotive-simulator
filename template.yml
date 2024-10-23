@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: CARLA Simulator Ubuntu with NICE DCV (login as ubuntu)
+Description: AWS IoT Automotive Demo - CARLA Simulator Ubuntu with NICE DCV Using MultiCast (login as ubuntu)
 Metadata:
   License:
     Description: |
@@ -9,26 +9,30 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Instance type
+          default: Carla Simulator Instance configuration
         Parameters:
+          - Ec2InstanceName
           - ImageId
-          - instanceType
+          - InstanceType
+          - Ec2InstanceVolumeSize
+          - Ec2InstanceVolumeType
       - Label:
-          default: EC2 configuration
-        Parameters:
-          - ec2Name
-      - Label:
-          default: EBS volume configuration
-        Parameters:
-          - volumeSize
-          - volumeType
-      - Label:
-          default: Biga configuration
+          default: Biga Instance configuration
         Parameters:
           - BigaAmiId
+          - BigaInstanceName
           - BigaInstanceType
+      - Label:
+          default: Other Parameters
+        Parameters:
+          - AllowedIP
+          - CarlaVersion
 Parameters:
-  instanceType:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Ubuntu 20.04 (x86_64)
+    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+  InstanceType:
     Type: String
     Description: Accelerated Instance Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/accelerated-computing-instances.html )
     AllowedValues:
@@ -46,25 +50,21 @@ Parameters:
       - g5.16xlarge
     ConstraintDescription: Must contain valid instance type.
     Default: g5.16xlarge
-  ec2Name:
-    Description: EC2 instance name
+  Ec2InstanceName:
+    Description: Name of the EC2 instance hosting the Carla Simulator.
     Type: String
     Default: Ubuntu-CARLA-NICE-DCV
-  volumeType:
+  Ec2InstanceVolumeType:
     Type: String
     Description: Volume Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html )
     AllowedValues:
       - gp2
       - gp3
     Default: gp3
-  volumeSize:
+  Ec2InstanceVolumeSize:
     Type: Number
     Description: Volume Size in GiBs (must be equal or larger than snapshot size)
     Default: 40
-  ImageId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Description: Ubuntu 20.04 (x86_64)
-    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
   BigaAmiId:
     Type: AWS::EC2::Image::Id
     Description: The Biga ami image id
@@ -76,106 +76,161 @@ Parameters:
     Type: String
     Description: Name of Biga Instance
     Default: Biga
-
+  AllowedIP:
+    Type: String
+    Description: Allowed IP address to connect to CARLA/Biga via Security Group on port 8443
+  CarlaVersion:
+    Type: String
+    Description: The Carla simulator version to be downloaded and installed
+    Default: 0.9.13
+  RepositoryURL:
+    Type: String
+    Description: The demo-iot-automotive-simulator github repository URL
+    Default: https://github.com/aws4embeddedlinux/demo-iot-automotive-simulator
 Resources:
-  vpc:
+  VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
-
-  PrivateSubnet1:
+      EnableDnsHostnames: true
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC"
+  VPCPrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      VpcId: !Ref vpc
-  PrivateSubnet2:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Private Subnet 1"
+  VPCPrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
-      VpcId: !Ref vpc
-  PublicSubnet:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Private Subnet 2"
+  VPCPublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: 10.0.3.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      VpcId: !Ref vpc
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      VpcId: !Ref VPC
       MapPublicIpOnLaunch: true
-
-  InternetGateway:
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Public Subnet"
+  VPCInternetGateway:
     Type: AWS::EC2::InternetGateway
-  InternetGatewayAttachment:
+    Properties:
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Internet Gateway"
+  VPCInternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref vpc
-      InternetGatewayId: !Ref InternetGateway
-
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref VPCInternetGateway
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref vpc
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Public Route Table"
   PublicRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
+      GatewayId: !Ref VPCInternetGateway
   PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnet
-
+      SubnetId: !Ref VPCPublicSubnet
   NatIP:
     Type: AWS::EC2::EIP
-    DependsOn: vpc
+    DependsOn: VPC
     Properties:
-      Domain: vpc
+      Domain: VPC
   NatGateway:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt NatIP.AllocationId
-      SubnetId: !Ref PublicSubnet
-
+      SubnetId: !Ref VPCPublicSubnet
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref vpc
+      VpcId: !Ref VPC
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+        - Key: StackId
+          Value: !Sub ${AWS::StackId}
+        - Key: Name
+          Value: !Sub "[${AWS::StackName}] - Biga VPC Private Route Table"
   PrivateRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway
-  PrivateSubnetRouteTableAssocation:
+  PrivateSubnetRouteTableAssociation1:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PrivateSubnet1
+      SubnetId: !Ref VPCPrivateSubnet1
       RouteTableId: !Ref PrivateRouteTable
-  PrivateSubnet2RouteTableAssociation:
+  PrivateSubnetRouteTableAssociation2:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PrivateSubnet2
+      SubnetId: !Ref VPCPrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
-
-
 
   BigaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow Traffic From Carla
-      VpcId: !Ref vpc
+      GroupDescription: Allow Traffic From/To Carla & Biga instances
+      VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           Description: SSH
           FromPort: "22"
           ToPort: "22"
+          CidrIp: 10.0.0.0/16
         - IpProtocol: udp
           Description: Ingress multicast traffic (UDP)
-          FromPort: '0'
-          ToPort: '65535'
+          FromPort: "0"
+          ToPort: "65535"
           CidrIp: 10.0.0.0/16
         - IpProtocol: 2
           Description: IGMP Receivers
@@ -183,11 +238,21 @@ Resources:
         - IpProtocol: 2
           Description: IGMP Querier
           CidrIp: 0.0.0.0/32
+        - IpProtocol: tcp
+          Description: external access - tcp - 8443
+          FromPort: "8443"
+          ToPort: "8443"
+          CidrIp: !Ref AllowedIP
+        - IpProtocol: udp
+          Description: external access - udp - 8443
+          FromPort: "8443"
+          ToPort: "8443"
+          CidrIp: !Ref AllowedIP
       SecurityGroupEgress:
         - IpProtocol: all
           Description: Egress multicast traffic (UDP)
-          FromPort: '0'
-          ToPort: '65535'
+          FromPort: "0"
+          ToPort: "65535"
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: StackName
@@ -195,8 +260,9 @@ Resources:
         - Key: StackId
           Value: !Sub ${AWS::StackId}
         - Key: Name
-          Value: !Sub "[${AWS::StackName}] - ${ec2Name}"
-  instanceIamRole:
+          Value: !Sub "[${AWS::StackName}] - Biga Security Group"
+
+  Ec2InstanceCarlaIamRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -224,62 +290,92 @@ Resources:
           Value: !Sub ${AWS::StackName}
         - Key: StackId
           Value: !Sub ${AWS::StackId}
-  instanceProfile:
+
+  Ec2InstanceCarlaProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref instanceIamRole
+        - !Ref Ec2InstanceCarlaIamRole
+
   Ec2InstanceCarlaNetworkInterface:
     Type: AWS::EC2::NetworkInterface
     Properties:
-      SubnetId: !Ref PrivateSubnet2
-      Description: "Network interface for ec2InstanceCarla"
+      SubnetId: !Ref VPCPublicSubnet
+      Description: "Network interface for Ec2InstanceCarla"
       GroupSet:
         - !Ref BigaSecurityGroup
-  ec2InstanceCarla:
+
+  Ec2InstanceBigaNetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref VPCPublicSubnet
+      Description: "Network interface for Ec2InstanceBiga"
+      GroupSet:
+        - !Ref BigaSecurityGroup
+
+  Ec2InstanceCarlaSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "ubuntu"}'
+        GenerateStringKey: password
+        ExcludeCharacters: "`'\"@/\\;,"
+        PasswordLength: 32
+
+  Ec2InstanceCarla:
     Type: AWS::EC2::Instance
+    DependsOn: Ec2InstanceCarlaSecret
     CreationPolicy:
       ResourceSignal:
         Timeout: PT90M
     Metadata:
       Comment: Install Desktop Environment
       AWS::CloudFormation::Init:
+        # we could have used a single config set, but then commands will be executed alphabetically
         configSets:
-          setup:
-            - 00_setup
-        00_setup:
-          files:
-            /home/ubuntu/update-dcv:
-              content: |
-                #!/bin/bash
-                cd /tmp
-                if ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 22.04 1>/dev/null)); then
-                  rm -f /tmp/nice-dcv-ubuntu1804-x86_64.tgz
-                  wget https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-                elif ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 18.04 1>/dev/null)); then
-                  rm -f /tmp/nice-dcv-ubuntu1804-x86_64.tgz
-                  wget https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-                elif (cat /etc/os-release | grep 18.04 1>/dev/null); then
-                  rm -f /tmp/nice-dcv-ubuntu1804-aarch64.tgz
-                  wget https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
-                else
-                  rm -f /tmp/nice-dcv-ubuntu2004-x86_64.tgz
-                  wget https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-                fi
-                sudo apt-get install -y ./nice-dcv-server_*.deb
-                sudo apt-get install -y ./nice-dcv-web-viewer_*.deb
-                sudo apt-get install -y ./nice-xdcv_*.deb
-              mode: "000755"
-              owner: ubuntu
-              group: users
-            /home/ubuntu/update-awscli:
-              content: |
-                #!/bin/bash
+          default:
+            - base-install
+            - awscli-install
+            - nvidia-install
+            - dcv-install-prerequisites
+            - dcv-install
+            - dcv-configure
+            - carla-install
+            - ros2-install
+            - canigen-install
+            - breeze-install
+            - socketcan-install
+            - firefox-install
+            - finalize-install
+        base-install:
+          commands:
+            base-install:
+              ignoreErrors: "false"
+              command: |
+                add-apt-repository ppa:deadsnakes/ppa -y
+                apt-get update
+                apt-get -q -y install python3
+                apt-get -q -y install python3-dev
+                apt-get -q -y install python3-venv
+                apt-get -q -y install python3-distutils
+                apt-get -q -y install python3-pip
+                apt-get -q -y install python3-setuptools
+                apt-get -q -y install python-is-python3
+                apt-get -q -y install locales
+                apt-get -q -y install software-properties-common
+                apt-get -q -y install wget
+                apt-get -q -y install tmux
+                apt-get -q -y install unzip
+                apt-get -q -y install tar
+                apt-get -q -y install curl
+                apt-get -q -y install sed
+        awscli-install:
+          commands:
+            awscli-install:
+              ignoreErrors: "false"
+              command: |
                 cd /tmp
                 rm -f /tmp/awscliv2.zip
                 if (uname -a | grep x86 1>/dev/null); then
@@ -288,53 +384,295 @@ Resources:
                   curl https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
                 fi
                 unzip -q -o awscliv2.zip
-                sudo ./aws/install --update -b /usr/bin
-              mode: "000755"
-              owner: ubuntu
-              group: users
-            /home/ubuntu/install-carla:
-              content: |
+                ./aws/install --update -b /usr/bin
+
+                rm -f /tmp/awscliv2.zip
+                echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/ubuntu/.bashrc
+        nvidia-install:
+          commands:
+            nvidia-install:
+              ignoreErrors: "false"
+              command: |
+                # Nvidia Drivers
+                apt-get -q -y install ubuntu-drivers-common
+                apt-get -q -y install $(nvidia-detector)
+
+                nvidia-xconfig --preserve-busid --enable-all-gpus
+        dcv-install-prerequisites:
+          commands:
+            dcv-install-prerequisites:
+              ignoreErrors: "false"
+              command: |
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-prereq.html
+                systemctl isolate graphical.target
+                systemctl set-default graphical.target
+
+                apt-get -q -y install ubuntu-desktop
+                apt-get -q -y install gdm3
+                apt-get -q -y install pulseaudio-utils
+                apt-get -q -y install libssl1.1
+                apt-get -q -y install mesa-utils
+                apt-get -q -y install xserver-xorg-video-dummy
+
+                # resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
+                apt-get -q -y install dpkg-dev
+
+                pip3 install crudini
+                crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
+
+                # systemctl stop gdm3
+                # systemctl start gdm3
+
+                # rm -rf /etc/X11/XF86Config*
+
+                systemctl isolate multi-user.target && systemctl isolate graphical.target
+        dcv-install:
+          commands:
+            dcv-install:
+              ignoreErrors: "false"
+              command: |
+                cd /tmp
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
+                wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
+                gpg --import NICE-GPG-KEY  
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
+
+                rm -f /tmp/nice-dcv-*.tgz
+                if ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 22.04 1>/dev/null)); then
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                elif ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 18.04 1>/dev/null)); then
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                elif (cat /etc/os-release | grep 18.04 1>/dev/null); then
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
+                else
+                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
+                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                fi
+
+                apt-get -q -y install ./nice-dcv-server_*.deb
+                apt-get -q -y install ./nice-dcv-web-viewer_*.deb
+                usermod -aG video dcv
+                apt-get -q -y install ./nice-xdcv_*.deb
+
+                # dcvstartx &
+                # pkill dcvstartx
+        dcv-configure:
+          commands:
+            dcv-configure:
+              ignoreErrors: "false"
+              command: |
+                pip3 install crudini
+
+                systemctl stop dcvserver
+
+                cp /etc/dcv/dcv.conf /etc/dcv/dcv.conf.original
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/enable-quic.html
+                crudini --set /etc/dcv/dcv.conf "security" "no-tls-strict" "true"
+
+                crudini --set /etc/dcv/dcv.conf "connectivity" "enable-quic-frontend" "false"
+                # crudini --set /etc/dcv/dcv.conf "connectivity" "enable-datagrams-display" "always-off"
+
+                crudini --set /etc/dcv/dcv.conf "connectivity" "quic-listen-endpoints" "['0.0.0.0:8443', '[::]:8443']"
+                crudini --set /etc/dcv/dcv.conf "connectivity" "quic-port" "8443"
+                crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints" "['0.0.0.0:8443', '[::]:8443']"
+                crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
+
+                # crudini --set /etc/dcv/dcv.conf "session-management" "create-session" "false"
+                # crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
+
+                # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
+                mkdir -p /home/ubuntu/DCV-Storage
+                chown -R ubuntu:ubuntu /home/ubuntu/DCV-Storage
+
+                # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
+                tee /opt/dcv-virtual-session.sh > /dev/null << EOF
                 #!/bin/bash
-                # install Python3.8 as default
-                sudo add-apt-repository ppa:deadsnakes/ppa -y
-                sudo apt-get update
-                sudo apt-get -q -y install python3.8 python3.8-dev python3.8-venv python3.8-distutils
-                sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
-                sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 1AF1527DE64CB8D9
-                sudo add-apt-repository -y "deb [arch=amd64] http://dist.carla.org/carla focal main"
-                sudo apt-get update
-                sudo apt-get -y install libomp5 carla-simulator
-                python -m ensurepip --upgrade
-                python -m venv ~/venv
-                source ~/venv/bin/activate
-                python -m pip install --upgrade pip
-                python -m pip install carla==0.9.13
-                python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
-                sudo apt-get -y install can-utils socat linux-modules-extra-$(uname -r)
-              mode: "000755"
-              owner: ubuntu
-              group: users
-            /home/ubuntu/install-ros2:
-              content: |
-                #!/bin/bash
-                sudo apt update && sudo apt install -y locales
-                sudo locale-gen en_US en_US.UTF-8
-                sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-                export LANG=en_US.UTF-8
-                sudo apt install -y software-properties-common
-                sudo add-apt-repository universe
-                sudo apt update && sudo apt install -y curl
-                sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-                sudo apt update
-                sudo apt install -y ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
-              mode: "000755"
-              owner: ubuntu
-              group: users
+                dcvUser=ubuntu
+                while true;
+                do
+                  if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
+                  then
+                    sleep 5
+                  else
+                    /usr/bin/dcv create-session demo --owner \$dcvUser --storage-root /home/\$dcvUser/DCV-Storage --type=virtual 
+                    /usr/bin/dcv list-sessions
+                  fi
+                done
+                EOF
+
+                tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
+                [Unit]
+                Description=Create DCV virtual session for user ubuntu
+                After=default.target network.target
+                [Service]
+                ExecStart=/opt/dcv-virtual-session.sh
+                [Install]
+                WantedBy=default.target
+                EOF
+
+                chmod +x /opt/dcv-virtual-session.sh
+
+                # text console: DCV virtual sessions only
+                systemctl daemon-reload
+                systemctl enable --now dcvserver
+                systemctl enable --now dcv-virtual-session
+
+                systemctl stop dcvserver
+                systemctl stop dcv-virtual-session
+
+                systemctl restart dcvserver
+                systemctl restart dcv-virtual-session
+
+                systemctl status dcvserver
+                systemctl status dcv-virtual-session
+        carla-install:
+          commands:
+            carla-install:
+              ignoreErrors: "false"
+              command: !Sub
+                - |
+                  apt-get -q -y install libomp5
+                  apt-get -q -y install can-utils
+                  apt-get -q -y install socat
+                  apt-get -q -y install linux-modules-extra-$(uname -r)
+
+                  export CARLA_VERSION=${CARLA_VERSION}
+
+                  mkdir -p /opt/carla-simulator/
+                  cd /opt/carla-simulator/
+                  wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_$CARLA_VERSION.tar.gz
+                  tar -xzvf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
+
+                  python -m pip install --upgrade pip
+                  python -m pip install --ignore-installed carla==$CARLA_VERSION
+                  python -m pip install --ignore-installed -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+
+                  # chmod -R a+rwx /opt/carla-simulator
+
+                  chown -R "ubuntu:ubuntu" /opt/carla-simulator
+                - CARLA_VERSION: !Ref CarlaVersion
+        ros2-install:
+          commands:
+            ros2-install:
+              ignoreErrors: "false"
+              command: !Sub
+                - |
+                  CARLA_VERSION=${CARLA_VERSION}
+
+                  locale-gen en_US en_US.UTF-8
+                  update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+                  export LANG=en_US.UTF-8
+
+                  add-apt-repository universe
+                  curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+                  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+                  apt-get update
+
+                  apt-get -q -y install ros-galactic-desktop
+                  apt-get -q -y install ros-dev-tools
+
+                  apt-get -q -y install python3-rosdep2
+                  apt-get -q -y install python3-colcon-common-extensions
+
+                  export CARLA_ROOT=/opt/carla-simulator/
+                  export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-$CARLA_VERSION-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
+                  source /opt/ros/galactic/setup.bash
+
+                  mkdir -p /home/ubuntu/ros2_ws/src 
+                  cd /home/ubuntu/ros2_ws/src
+                  git clone https://github.com/astuff/astuff_sensor_msgs.git
+
+                  cd /home/ubuntu/ros2_ws
+                  colcon build --symlink-install
+                  source /home/ubuntu/ros2_ws/install/setup.bash
+                  rosdep install --from-paths src --ignore-src -r -y
+
+                  cd /home/ubuntu/ros2_ws/src
+                  git clone https://github.com/carla-simulator/ros-bridge.git ros-bridge
+                  cd /home/ubuntu/ros2_ws/src/ros-bridge
+                  git submodule update --init --recursive
+
+                  rosdep update
+
+                  cd /home/ubuntu/ros2_ws
+                  rosdep install --from-paths src --ignore-src -r -y
+                  colcon build --symlink-install
+
+                  chown -R "ubuntu:ubuntu" /home/ubuntu/ros2_ws
+                - CARLA_VERSION: !Ref CarlaVersion
+        socketcan-install:
+          commands:
+            ros2-install:
+              ignoreErrors: "false"
+              command: !Sub
+                - |
+                  # cloning the repository
+                  mkdir -p /home/ubuntu/
+                  cd /home/ubuntu/Desktop
+                  git clone ${REPO_URL}
+
+                  cd /home/ubuntu/Desktop/demo-iot-automotive-simulator/socket-can-setup
+                  sudo cp setup-socketcan.sh /usr/bin
+                  sudo cp setup-socketcan.service /lib/systemd/system
+
+                  systemctl start setup-socketcan
+                  systemctl enable setup-socketcan
+
+                  chown -R "ubuntu:ubuntu" /home/ubuntu/Desktop
+
+                - REPO_URL: !Ref RepositoryURL
+        breeze-install:
+          commands:
+            carla-install:
+              ignoreErrors: "false"
+              command: |
+                apt-get -q -y install python3-pyqt5  
+                apt-get -q -y install pyqt5-dev-tools
+                apt-get -q -y install qttools5-dev-tools
+
+        canigen-install:
+          commands:
+            carla-install:
+              ignoreErrors: "false"
+              command: |
+                python -m pip install --ignore-installed cantools                 
+                python -m pip install --ignore-installed prompt_toolkit
+                python -m pip install --ignore-installed python-can
+                python -m pip install --ignore-installed can-isotp  
+        firefox-install:
+          commands:
+            firefox-install:
+              ignoreErrors: "false"
+              command: |
+                # install firefox browser
+                apt-get -q -y install firefox
+        finalize-install:
+          commands:
+            finalize-install:
+              ignoreErrors: "false"
+              command: !Sub
+                - |
+                  # remove unsued package
+                  apt-get -y autoremove
+
+                  # check all process are running
+                  ps -edf | grep dcv
+
+                  # change the ubuntu user password using the secret
+                  echo "ubuntu:${PASSWORD}" | sudo chpasswd
+
+                - PASSWORD: "{{resolve:secretsmanager:Ec2InstanceCarlaSecret:SecretString:password}}"
     Properties:
       ImageId: !Ref ImageId
-      InstanceType: !Ref instanceType
-      IamInstanceProfile: !Ref instanceProfile
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Ec2InstanceCarlaProfile
       Monitoring: true
       NetworkInterfaces:
         - NetworkInterfaceId: !Ref Ec2InstanceCarlaNetworkInterface
@@ -342,126 +680,54 @@ Resources:
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeType: !Ref volumeType
-            VolumeSize: !Ref volumeSize
+            VolumeType: !Ref Ec2InstanceVolumeType
+            VolumeSize: !Ref Ec2InstanceVolumeSize
             DeleteOnTermination: true
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash
-          cd /root/
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> start" >> ~/my-cfn-init.log > ~/my-cfn-init.log
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> start" >> ~/my-cfn-init.log
           # https://stackoverflow.com/questions/33370297/apt-get-update-non-interactive
           export DEBIAN_FRONTEND=noninteractive
+          add-apt-repository ppa:deadsnakes/ppa -y
           apt-get update
-          # https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-ubuntu.html#agent-install-ubuntu-tabs
-          apt-get install -q -y python-setuptools wget tmux unzip tar curl sed
-          # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/releasehistory-aws-cfn-bootstrap.html#releasehistory-aws-cfn-bootstrap-v1
-          wget -nv https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-1.4-34.tar.gz
-          tar -xvzf ./aws-cfn-bootstrap-1.4-34.tar.gz
-          cd aws-cfn-bootstrap-1.4
-          python2 setup.py build
-          python2 setup.py install
+          apt-get -q -y install python3 python3-dev python3-venv python3-distutils python3-pip python3-setuptools python-is-python3
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> done" >> ~/my-cfn-init.log
+              
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> start" >> ~/my-cfn-init.log
+          cd /tmp
+          # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/releasehistory-aws-cfn-bootstrap.html
+          wget -nv https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-31.tar.gz
+          tar -xvzf ./aws-cfn-bootstrap-py*
+          cd aws-cfn-bootstrap-2.0
+          python3 setup.py build
+          python3 setup.py install
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> done" >> ~/my-cfn-init.log
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> start" >> ~/my-cfn-init.log
           # cfn-init
-          python2 /usr/local/bin/cfn-init -v --stack ${AWS::StackName} --resource ec2InstanceCarla --region ${AWS::Region} -c setup
-          # install firefox browser
-          apt-get -q -y install firefox
-          # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-prereq.html
-          systemctl isolate multi-user.target
-          apt-get -q -y install ubuntu-desktop
-          apt-get -q -y install gdm3
-          apt-get -q -y install pulseaudio-utils
-          # resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
-          apt-get -q -y install dpkg-dev
-          sed -i "s/^#WaylandEnable=false/WaylandEnable=false/g" /etc/gdm3/custom.conf
-          # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
-          wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
-          gpg --import NICE-GPG-KEY
-          # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
-          if ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 22.04 1>/dev/null)); then
-            wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
-            tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-          elif ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 18.04 1>/dev/null)); then
-            wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
-            tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-          elif (cat /etc/os-release | grep 18.04 1>/dev/null); then
-            wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
-            tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
-          else
-            wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
-            tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-          fi
-          apt-get -q -y install ./nice-dcv-server_*.deb
-          apt-get -q -y install ./nice-dcv-web-viewer_*.deb
-          usermod -aG video dcv
-          apt-get -q -y install ./nice-xdcv_*.deb
-          # https://docs.aws.amazon.com/dcv/latest/adminguide/enable-quic.html
-          cp /etc/dcv/dcv.conf /etc/dcv/dcv.conf.org
-          sed -i '/^\[connectivity/a enable-quic-frontend=true' /etc/dcv/dcv.conf
-          # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-          mkdir -p /home/ubuntu/DCV-Storage
-          chown -R ubuntu:ubuntu /home/ubuntu/DCV-Storage
-          # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
-          cat << EoF > /etc/systemd/system/dcv-virtual-session.service
-          [Unit]
-          Description=Create DCV virtual session for user ubuntu
-          After=default.target network.target
-          [Service]
-          ExecStart=/opt/dcv-virtual-session.sh
-          [Install]
-          WantedBy=default.target
-          EoF
-          cat << EoF > /opt/dcv-virtual-session.sh
-          #!/bin/bash
-          dcvUser=ubuntu
-          while true;
-          do
-            if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
-            then
-              sleep 5
-            else
-              /usr/bin/dcv create-session \$dcvUser --owner \$dcvUser --storage-root /home/\$dcvUser/DCV-Storage
-              /usr/bin/dcv list-sessions
-            fi
-          done
-          EoF
-          chmod +x /opt/dcv-virtual-session.sh
-          cd /root/
-          apt-get -y autoremove
-          # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
-          if (uname -a | grep x86 1>/dev/null); then
-            curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
-          else
-            curl -s https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
-          fi
-          unzip -q -o awscliv2.zip
-          ./aws/install -b /usr/bin
-          echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/ubuntu/.bashrc
-          # text console: DCV virtual sessions only
-          systemctl isolate multi-user.target
-          systemctl set-default multi-user.target
-          systemctl daemon-reload
-          systemctl enable --now dcvserver dcv-virtual-session.service
-          # Nvidia Drivers
-          apt install -q -y $(nvidia-detector)
+          cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> done" >> ~/my-cfn-init.log
+
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> start" >> ~/my-cfn-init.log
           # cfn-init completed so signal success or not
-          python2 /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ec2InstanceCarla --region ${AWS::Region}
+          cfn-signal -e $? --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> done" >> ~/my-cfn-init.log
+
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> done" >> ~/my-cfn-init.log
           reboot
       Tags:
         - Key: Name
-          Value: !Ref ec2Name
+          Value: !Ref Ec2InstanceName
         - Key: StackName
           Value: !Sub ${AWS::StackName}
         - Key: StackId
           Value: !Sub ${AWS::StackId}
 
-  Ec2InstanceBigaNetworkInterface:
-    Type: AWS::EC2::NetworkInterface
-    Properties:
-      SubnetId: !Ref PrivateSubnet1
-      Description: "Network interface for ec2InstanceBiga"
-      GroupSet:
-        - !Ref BigaSecurityGroup
-
-  ec2InstanceBiga:
+  Ec2InstanceBiga:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref BigaAmiId
@@ -470,10 +736,10 @@ Resources:
         - NetworkInterfaceId: !Ref Ec2InstanceBigaNetworkInterface
           DeviceIndex: "0"
       Tags:
-          - Key: Name
-            Value: !Ref BigaInstanceName
+        - Key: Name
+          Value: !Ref BigaInstanceName
 
-  MyTransitGateway:
+  VPCMultiCastTransitGateway:
     Type: "AWS::EC2::TransitGateway"
     Properties:
       Description: "Transit Gateway for multicast"
@@ -485,65 +751,91 @@ Resources:
       MulticastSupport: "enable"
       VpnEcmpSupport: "enable"
 
-  TransitGatewayAttachmentVPC:
+  VPCMultiCastTransitGatewayAttachment:
     Type: "AWS::EC2::TransitGatewayAttachment"
     Properties:
-      TransitGatewayId: !Ref MyTransitGateway
-      VpcId: !Ref vpc
+      TransitGatewayId: !Ref VPCMultiCastTransitGateway
+      VpcId: !Ref VPC
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+        - !Ref VPCPublicSubnet
+        - !Ref VPCPrivateSubnet1
+        - !Ref VPCPrivateSubnet2
 
-  TransitGatewayMulticastDomain:
+  VPCMultiCastTransitGatewayDomain:
     Type: "AWS::EC2::TransitGatewayMulticastDomain"
     Properties:
-      TransitGatewayId: !Ref MyTransitGateway
+      TransitGatewayId: !Ref VPCMultiCastTransitGateway
       Options:
-        Igmpv2Support: 'enable'
+        Igmpv2Support: "enable"
 
-  MulticastDomainAssociation1:
+  VPCMultiCastTransitGatewayDomainAssociation0:
     Type: "AWS::EC2::TransitGatewayMulticastDomainAssociation"
     Properties:
-      SubnetId: !Ref PrivateSubnet1
-      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentVPC
-      TransitGatewayMulticastDomainId: !Ref TransitGatewayMulticastDomain
+      SubnetId: !Ref VPCPublicSubnet
+      TransitGatewayAttachmentId: !Ref VPCMultiCastTransitGatewayAttachment
+      TransitGatewayMulticastDomainId: !Ref VPCMultiCastTransitGatewayDomain
 
-  MulticastDomainAssociation2:
+  VPCMultiCastTransitGatewayDomainAssociation1:
     Type: "AWS::EC2::TransitGatewayMulticastDomainAssociation"
     Properties:
-      SubnetId: !Ref PrivateSubnet2
-      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentVPC
-      TransitGatewayMulticastDomainId: !Ref TransitGatewayMulticastDomain
+      SubnetId: !Ref VPCPrivateSubnet1
+      TransitGatewayAttachmentId: !Ref VPCMultiCastTransitGatewayAttachment
+      TransitGatewayMulticastDomainId: !Ref VPCMultiCastTransitGatewayDomain
 
-  MulticastGroupMember1:
-    Type: AWS::EC2::TransitGatewayMulticastGroupMember
-    DependsOn: MulticastDomainAssociation1
+  VPCMultiCastTransitGatewayDomainAssociation2:
+    Type: "AWS::EC2::TransitGatewayMulticastDomainAssociation"
     Properties:
-      GroupIpAddress: '239.255.0.1'
-      NetworkInterfaceId:  !Ref Ec2InstanceBigaNetworkInterface
-      TransitGatewayMulticastDomainId: !Ref TransitGatewayMulticastDomain
+      SubnetId: !Ref VPCPrivateSubnet2
+      TransitGatewayAttachmentId: !Ref VPCMultiCastTransitGatewayAttachment
+      TransitGatewayMulticastDomainId: !Ref VPCMultiCastTransitGatewayDomain
 
-  MulticastGroupMember2:
+  VPCMultiCastTransitGatewayGroupMember1:
     Type: AWS::EC2::TransitGatewayMulticastGroupMember
-    DependsOn: MulticastDomainAssociation2
+    DependsOn: VPCMultiCastTransitGatewayDomainAssociation1
     Properties:
-      GroupIpAddress: '239.255.0.1'
+      GroupIpAddress: "239.255.0.1"
+      NetworkInterfaceId: !Ref Ec2InstanceBigaNetworkInterface
+      TransitGatewayMulticastDomainId: !Ref VPCMultiCastTransitGatewayDomain
+
+  VPCMultiCastTransitGatewayGroupMember2:
+    Type: AWS::EC2::TransitGatewayMulticastGroupMember
+    DependsOn: VPCMultiCastTransitGatewayDomainAssociation2
+    Properties:
+      GroupIpAddress: "239.255.0.1"
       NetworkInterfaceId: !Ref Ec2InstanceCarlaNetworkInterface
-      TransitGatewayMulticastDomainId: !Ref TransitGatewayMulticastDomain
+      TransitGatewayMulticastDomainId: !Ref VPCMultiCastTransitGatewayDomain
 
 Outputs:
-  InstanceID:
-    Description: EC2 Instance ID
-    Value: !Ref ec2InstanceCarla
-  SSMsessionManager:
-    Description: SSM Session Manager login ("sudo passwd ubuntu" to change password)
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager/session-manager/${ec2InstanceCarla}
-  DCVdownload:
+  CarlaSimulatorInstanceID:
+    Description: Carla Simulator EC2 Instance ID
+    Value: !Ref Ec2InstanceCarla
+  CarlaSimulatorSecret:
+    Description: Carla Simulator OS user & password secret
+    Value: !Ref Ec2InstanceCarlaSecret
+  SSMSessionManagerURL:
+    Description: SSM Session Manager access link
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager/session-manager/${Ec2InstanceCarla}
+  NICEDCVWebAccessConsoleURL:
+    Description: NICE DCV Web Access Console
+    # Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager:8443
+    Value: !Join
+      - ""
+      - - "https://"
+        - !GetAtt
+          - Ec2InstanceCarla
+          - PublicDnsName
+        - :8443
+  NICEDCVClientConnectionString:
+    Description: NICE DCV Client Connection String
+    Value: !Join
+      - ""
+      - - !GetAtt
+          - Ec2InstanceCarla
+          - PublicDnsName
+        - :8443
+  NICEDCVClientDownloadURL:
     Description: DCV client download
     Value: https://download.nice-dcv.com
-  CARLAinstall:
-    Description: Command to download and install CARLA
-    Value: /home/ubuntu/install-carla
   CARLApath:
     Description: CARLA installation target path
     Value: /opt/carla-simulator/

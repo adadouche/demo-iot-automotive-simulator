@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: AWS IoT Automotive Demo - CARLA Simulator Ubuntu with NICE DCV Using Unicast (login as ubuntu)
+Description: CARLA Simulator Ubuntu with NICE DCV (login as ubuntu)
 Metadata:
   License:
     Description: |
@@ -9,30 +9,26 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Carla Simulator Instance configuration
+          default: Instance type
         Parameters:
-          - Ec2InstanceName
           - ImageId
-          - InstanceType
-          - Ec2InstanceVolumeSize
-          - Ec2InstanceVolumeType
+          - instanceType
       - Label:
-          default: Biga Instance configuration
+          default: EC2 configuration
+        Parameters:
+          - ec2Name
+      - Label:
+          default: EBS volume configuration
+        Parameters:
+          - volumeSize
+          - volumeType
+      - Label:
+          default: Biga configuration
         Parameters:
           - BigaAmiId
-          - BigaInstanceName
           - BigaInstanceType
-      - Label:
-          default: Other Parameters
-        Parameters:
-          - AllowedIP
-          - CarlaVersion
 Parameters:
-  ImageId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Description: Ubuntu 20.04 (x86_64)
-    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
-  InstanceType:
+  instanceType:
     Type: String
     Description: Accelerated Instance Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/accelerated-computing-instances.html )
     AllowedValues:
@@ -50,21 +46,25 @@ Parameters:
       - g5.16xlarge
     ConstraintDescription: Must contain valid instance type.
     Default: g5.16xlarge
-  Ec2InstanceName:
-    Description: Name of the EC2 instance hosting the Carla Simulator.
+  ec2Name:
+    Description: EC2 instance name
     Type: String
     Default: Ubuntu-CARLA-NICE-DCV
-  Ec2InstanceVolumeType:
+  volumeType:
     Type: String
     Description: Volume Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html )
     AllowedValues:
       - gp2
       - gp3
     Default: gp3
-  Ec2InstanceVolumeSize:
+  volumeSize:
     Type: Number
     Description: Volume Size in GiBs (must be equal or larger than snapshot size)
     Default: 40
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Ubuntu 20.04 (x86_64)
+    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
   BigaAmiId:
     Type: AWS::EC2::Image::Id
     Description: The Biga ami image id
@@ -76,17 +76,7 @@ Parameters:
     Type: String
     Description: Name of Biga Instance
     Default: Biga
-  AllowedIP:
-    Type: String
-    Description: Allowed IP address to connect to CARLA/Biga via Security Group on port 8443
-  CarlaVersion:
-    Type: String
-    Description: The Carla simulator version to be downloaded and installed
-    Default: 0.9.13
-  RepositoryURL:
-    Type: String
-    Description: The demo-iot-automotive-simulator github repository URL
-    Default: https://github.com/aws4embeddedlinux/demo-iot-automotive-simulator
+
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -131,7 +121,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: 10.0.3.0/24
-      AvailabilityZone: !Select [2, !GetAZs ""]
+      AvailabilityZone: !Select [0, !GetAZs ""]
       VpcId: !Ref VPC
       MapPublicIpOnLaunch: true
       Tags:
@@ -219,37 +209,54 @@ Resources:
   BigaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow Traffic From/To Carla & Biga instances
+      GroupDescription: Allow Traffic From/To Carla
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           Description: SSH
           FromPort: "22"
-          ToPort: "22"
-          CidrIp: 10.0.0.0/16
-        - IpProtocol: udp
-          Description: Ingress traffic (UDP) for ROS2
-          FromPort: '7400'
-          ToPort: '65400'
-          CidrIp: 10.0.0.0/16
-        - IpProtocol: udp
-          Description: vCAN
-          FromPort: '3030'
-          ToPort: '3030'
-          CidrIp: 10.0.0.0/16
-        - IpProtocol: 2
-          Description: IGMP Querier
-          CidrIp: 0.0.0.0/32
+          ToPort: "22"      
+        - IpProtocol: tcp
+          Description: HTTP
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 91.169.31.0/24
+        - IpProtocol: tcp
+          Description: HTTPS
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 91.169.31.0/24
         - IpProtocol: tcp
           Description: tcp 8443
           FromPort: "8443"
           ToPort: "8443"
-          CidrIp: !Ref AllowedIP
+          CidrIp: 91.169.31.0/24
         - IpProtocol: udp
           Description: udp 8443
           FromPort: "8443"
           ToPort: "8443"
-          CidrIp: !Ref AllowedIP
+          CidrIp: 91.169.31.0/24
+        - IpProtocol: udp
+          Description: Ingress traffic (UDP) for ROS2
+          FromPort: "7400"
+          ToPort: "65400"
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: udp
+          Description: vCAN
+          FromPort: "3030"
+          ToPort: "3030"
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: udp
+          Description: Ingress multicast traffic (UDP)
+          FromPort: "0"
+          ToPort: "65535"
+          CidrIp: 10.0.0.0/16
+      SecurityGroupEgress:
+        - IpProtocol: all
+          Description: Egress multicast traffic (UDP)
+          FromPort: "0"
+          ToPort: "65535"
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: StackName
           Value: !Sub ${AWS::StackName}
@@ -310,18 +317,8 @@ Resources:
       GroupSet:
         - !Ref BigaSecurityGroup
 
-  Ec2InstanceCarlaSecret:
-    Type: "AWS::SecretsManager::Secret"
-    Properties:
-      Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "ubuntu"}'
-        GenerateStringKey: password
-        PasswordLength: 32
-
   Ec2InstanceCarla:
     Type: AWS::EC2::Instance
-    DependsOn: Ec2InstanceCarlaSecret
     CreationPolicy:
       ResourceSignal:
         Timeout: PT90M
@@ -333,44 +330,47 @@ Resources:
           default:
             - base-install
             - awscli-install
-            - nvidia-install
             - dcv-install-prerequisites
             - dcv-install
             - dcv-configure
             - carla-install
             - ros2-install
-            - canigen-install
-            - breeze-install
-            - socketcan-install
             - firefox-install
+            - nvidia-install
             - finalize-install
         base-install:
           commands:
             base-install:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
-                add-apt-repository ppa:deadsnakes/ppa -y
-                apt-get update
-                apt-get -q -y install python3
-                apt-get -q -y install python3-dev
-                apt-get -q -y install python3-venv
-                apt-get -q -y install python3-distutils
-                apt-get -q -y install python3-pip
-                apt-get -q -y install python3-setuptools
-                apt-get -q -y install python-is-python3
-                apt-get -q -y install locales
-                apt-get -q -y install software-properties-common
-                apt-get -q -y install wget
-                apt-get -q -y install tmux
-                apt-get -q -y install unzip
-                apt-get -q -y install tar
-                apt-get -q -y install curl
-                apt-get -q -y install sed
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] base-install -> start" >> ~/my-cfn-init.log
+                sudo add-apt-repository ppa:deadsnakes/ppa -y
+                sudo apt-get update
+                sudo apt-get -q -y install python3 >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-dev >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-venv >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-distutils >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-pip >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python3-setuptools >> ~/my-cfn-init.log
+                sudo apt-get -q -y install python-is-python3 >> ~/my-cfn-init.log
+                sudo apt-get -q -y install locales >> ~/my-cfn-init.log
+                sudo apt-get -q -y install software-properties-common >> ~/my-cfn-init.log
+
+                # https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-ubuntu.html#agent-install-ubuntu-tabs
+                sudo apt-get -q -y install wget >> ~/my-cfn-init.log
+                sudo apt-get -q -y install tmux >> ~/my-cfn-init.log
+                sudo apt-get -q -y install unzip >> ~/my-cfn-init.log
+                sudo apt-get -q -y install tar >> ~/my-cfn-init.log
+                sudo apt-get -q -y install curl >> ~/my-cfn-init.log
+                sudo apt-get -q -y install sed >> ~/my-cfn-init.log
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] base-install -> done" >> ~/my-cfn-init.log
         awscli-install:
           commands:
             awscli-install:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] awscli-install -> start" >> ~/my-cfn-init.log
                 cd /tmp
                 rm -f /tmp/awscliv2.zip
                 if (uname -a | grep x86 1>/dev/null); then
@@ -379,58 +379,55 @@ Resources:
                   curl https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
                 fi
                 unzip -q -o awscliv2.zip
-                ./aws/install --update -b /usr/bin
+                sudo ./aws/install --update -b /usr/bin
 
-                rm -f /tmp/awscliv2.zip
-                echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/ubuntu/.bashrc
-        nvidia-install:
-          commands:
-            nvidia-install:
-              ignoreErrors: "false"
-              command: |
-                # Nvidia Drivers
-                apt-get -q -y install ubuntu-drivers-common
-                apt-get -q -y install $(nvidia-detector)
+                echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> ~/.bashrc
 
-                nvidia-xconfig --preserve-busid --enable-all-gpus
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] awscli-install -> done" >> ~/my-cfn-init.log
         dcv-install-prerequisites:
           commands:
             dcv-install-prerequisites:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install-prerequisites -> start" >> ~/my-cfn-init.log
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-prereq.html
-                systemctl isolate graphical.target
-                systemctl set-default graphical.target
+                sudo systemctl isolate graphical.target
+                sudo systemctl set-default graphical.target
 
-                apt-get -q -y install ubuntu-desktop
-                apt-get -q -y install gdm3
-                apt-get -q -y install pulseaudio-utils
-                apt-get -q -y install libssl1.1
-                apt-get -q -y install mesa-utils
-                apt-get -q -y install xserver-xorg-video-dummy
+                sudo apt-get -q -y install ubuntu-desktop
+                sudo apt-get -q -y install gdm3
+                sudo apt-get -q -y install pulseaudio-utils
+                sudo apt-get -q -y install libssl1.1
+                sudo apt-get -q -y install mesa-utils
+                sudo apt-get -q -y install xserver-xorg-video-dummy
 
                 # resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
-                apt-get -q -y install dpkg-dev
+                sudo apt-get -q -y install dpkg-dev
 
-                pip3 install crudini
-                crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
+                sudo pip3 install crudini
+                sudo crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
 
-                # systemctl stop gdm3
-                # systemctl start gdm3
+                sudo dpkg-reconfigure gdm3
+                sudo systemctl restart gdm3
 
-                # rm -rf /etc/X11/XF86Config*
+                sudo DISPLAY=:0 XAUTHORITY=$(ps aux | grep "X.*\-auth" | grep -v grep | sed -n 's/.*-auth \([^ ]\+\).*/\1/p') glxinfo | grep -i "opengl.*version" >> ~/my-cfn-init.log
 
-                systemctl isolate multi-user.target && systemctl isolate graphical.target
+                sudo nvidia-xconfig --preserve-busid --enable-all-gpus
+                sudo rm -rf /etc/X11/XF86Config*
+
+                sudo systemctl isolate multi-user.target && sudo systemctl isolate graphical.target
+                sudo dcvstartx & >> ~/my-cfn-init.log
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install-prerequisites -> done" >> ~/my-cfn-init.log
         dcv-install:
           commands:
             dcv-install:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install -> start" >> ~/my-cfn-init.log
                 cd /tmp
-
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
                 wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
-                gpg --import NICE-GPG-KEY  
+                sudo gpg --import NICE-GPG-KEY  
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
 
@@ -449,44 +446,42 @@ Resources:
                   tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
                 fi
 
-                apt-get -q -y install ./nice-dcv-server_*.deb
-                apt-get -q -y install ./nice-dcv-web-viewer_*.deb
+                sudo apt-get -q -y install ./nice-dcv-server_*.deb
+                sudo apt-get -q -y install ./nice-dcv-web-viewer_*.deb                
                 usermod -aG video dcv
-                apt-get -q -y install ./nice-xdcv_*.deb
+                sudo apt-get -q -y install ./nice-xdcv_*.deb
 
-                # dcvstartx &
-                # pkill dcvstartx
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-install -> done" >> ~/my-cfn-init.log
         dcv-configure:
           commands:
             dcv-configure:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
-                pip3 install crudini
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-configure -> start" >> ~/my-cfn-init.log
+                sudo pip3 install crudini >> ~/my-cfn-init.log
 
-                systemctl stop dcvserver
+                sudo systemctl stop dcvserver
 
-                cp /etc/dcv/dcv.conf /etc/dcv/dcv.conf.original
+                sudo cp /etc/dcv/dcv.conf /etc/dcv/dcv.conf.original
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/enable-quic.html
-                crudini --set /etc/dcv/dcv.conf "security" "no-tls-strict" "true"
+                sudo crudini --set /etc/dcv/dcv.conf "security" "no-tls-strict" "true"
 
-                crudini --set /etc/dcv/dcv.conf "connectivity" "enable-quic-frontend" "false"
-                # crudini --set /etc/dcv/dcv.conf "connectivity" "enable-datagrams-display" "always-off"
-
-                crudini --set /etc/dcv/dcv.conf "connectivity" "quic-listen-endpoints" "['0.0.0.0:8443', '[::]:8443']"
-                crudini --set /etc/dcv/dcv.conf "connectivity" "quic-port" "8443"
-                crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints" "['0.0.0.0:8443', '[::]:8443']"
-                crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
-
-                # crudini --set /etc/dcv/dcv.conf "session-management" "create-session" "false"
-                # crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "enable-quic-frontend" "false"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "quic-listen-endpoints=['0.0.0.0:8443', '[::]:8443']"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "quic-port" "8443"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints=['0.0.0.0:8443', '[::]:8443']"
+                sudo crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
+                
+                # sudo crudini --set /etc/dcv/dcv.conf "session-management" "create-session" "false"
+                # sudo crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
 
                 # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
                 mkdir -p /home/ubuntu/DCV-Storage
                 chown -R ubuntu:ubuntu /home/ubuntu/DCV-Storage
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
-                tee /opt/dcv-virtual-session.sh > /dev/null << EOF
+                sudo tee /opt/dcv-virtual-session.sh > /dev/null << EOF
                 #!/bin/bash
                 dcvUser=ubuntu
                 while true;
@@ -501,7 +496,7 @@ Resources:
                 done
                 EOF
 
-                tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
+                sudo tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
                 [Unit]
                 Description=Create DCV virtual session for user ubuntu
                 After=default.target network.target
@@ -511,162 +506,101 @@ Resources:
                 WantedBy=default.target
                 EOF
 
-                chmod +x /opt/dcv-virtual-session.sh
+                sudo chmod +x /opt/dcv-virtual-session.sh
 
                 # text console: DCV virtual sessions only
-                systemctl daemon-reload
-                systemctl enable --now dcvserver
-                systemctl enable --now dcv-virtual-session
+                sudo systemctl daemon-reload
+                sudo systemctl enable --now dcvserver
+                sudo systemctl enable --now dcv-virtual-session.service
 
-                systemctl stop dcvserver
-                systemctl stop dcv-virtual-session
+                sudo systemctl stop dcvserver
+                sudo systemctl stop dcv-virtual-session.service
 
-                systemctl restart dcvserver
-                systemctl restart dcv-virtual-session
+                sudo systemctl restart dcvserver
+                sudo systemctl restart dcv-virtual-session.service
 
-                systemctl status dcvserver
-                systemctl status dcv-virtual-session
+                sudo systemctl status dcvserver >> ~/my-cfn-init.log
+                sudo systemctl status dcv-virtual-session.service >> ~/my-cfn-init.log
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] dcv-configure -> done" >> ~/my-cfn-init.log
         carla-install:
           commands:
             carla-install:
-              ignoreErrors: "false"
-              command: !Sub
-                - |
-                  apt-get -q -y install libomp5
-                  apt-get -q -y install can-utils
-                  apt-get -q -y install socat
-                  apt-get -q -y install linux-modules-extra-$(uname -r)
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] carla-install -> start" >> ~/my-cfn-init.log
 
-                  export CARLA_VERSION=${CARLA_VERSION}
+                sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 1AF1527DE64CB8D9
+                sudo add-apt-repository -y "deb [arch=amd64] http://dist.carla.org/carla focal main"
+                sudo apt-get update
 
-                  mkdir -p /opt/carla-simulator/
-                  cd /opt/carla-simulator/
-                  wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_$CARLA_VERSION.tar.gz
-                  tar -xzvf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
+                sudo apt-get -y install libomp5 carla-simulator
 
-                  python -m pip install --upgrade pip
-                  python -m pip install --ignore-installed carla==$CARLA_VERSION
-                  python -m pip install --ignore-installed -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+                python -m ensurepip --upgrade
+                python -m venv ~/venv
+                source ~/venv/bin/activate
+                python -m pip install --upgrade pip
+                python -m pip install carla==0.9.13
+                python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+                sudo apt-get -y install can-utils socat linux-modules-extra-$(uname -r)
 
-                  # chmod -R a+rwx /opt/carla-simulator
-
-                  chown -R "ubuntu:ubuntu" /opt/carla-simulator
-                - CARLA_VERSION: !Ref CarlaVersion
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] carla-install -> done" >> ~/my-cfn-init.log
         ros2-install:
           commands:
             ros2-install:
-              ignoreErrors: "false"
-              command: !Sub
-                - |
-                  CARLA_VERSION=${CARLA_VERSION}
-
-                  locale-gen en_US en_US.UTF-8
-                  update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-                  export LANG=en_US.UTF-8
-
-                  add-apt-repository universe
-                  curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-                  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-                  apt-get update
-
-                  apt-get -q -y install ros-galactic-desktop
-                  apt-get -q -y install ros-dev-tools
-
-                  apt-get -q -y install python3-rosdep2
-                  apt-get -q -y install python3-colcon-common-extensions
-
-                  export CARLA_ROOT=/opt/carla-simulator/
-                  export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-$CARLA_VERSION-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
-                  source /opt/ros/galactic/setup.bash
-
-                  mkdir -p /home/ubuntu/ros2_ws/src 
-                  cd /home/ubuntu/ros2_ws/src
-                  git clone https://github.com/astuff/astuff_sensor_msgs.git
-
-                  cd /home/ubuntu/ros2_ws
-                  colcon build --symlink-install
-                  source /home/ubuntu/ros2_ws/install/setup.bash
-                  rosdep install --from-paths src --ignore-src -r -y
-
-                  cd /home/ubuntu/ros2_ws/src
-                  git clone https://github.com/carla-simulator/ros-bridge.git ros-bridge
-                  cd /home/ubuntu/ros2_ws/src/ros-bridge
-                  git submodule update --init --recursive
-
-                  rosdep update
-
-                  cd /home/ubuntu/ros2_ws
-                  rosdep install --from-paths src --ignore-src -r -y
-                  colcon build --symlink-install
-
-                  chown -R "ubuntu:ubuntu" /home/ubuntu/ros2_ws
-                - CARLA_VERSION: !Ref CarlaVersion
-        socketcan-install:
-          commands:
-            ros2-install:
-              ignoreErrors: "false"
-              command: !Sub
-                - |
-                  # cloning the repository
-                  mkdir -p /home/ubuntu/
-                  cd /home/ubuntu/Desktop
-                  git clone ${REPO_URL}
-
-                  cd /home/ubuntu/Desktop/demo-iot-automotive-simulator/socket-can-setup
-                  sudo cp setup-socketcan.sh /usr/bin
-                  sudo cp setup-socketcan.service /lib/systemd/system
-
-                  systemctl start setup-socketcan
-                  systemctl enable setup-socketcan
-
-                  chown -R "ubuntu:ubuntu" /home/ubuntu/Desktop
-
-                - REPO_URL: !Ref RepositoryURL
-        breeze-install:
-          commands:
-            carla-install:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
-                apt-get -q -y install python3-pyqt5  
-                apt-get -q -y install pyqt5-dev-tools
-                apt-get -q -y install qttools5-dev-tools
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ros2-install -> start" >> ~/my-cfn-init.log
 
-        canigen-install:
-          commands:
-            carla-install:
-              ignoreErrors: "false"
-              command: |
-                python -m pip install --ignore-installed cantools                 
-                python -m pip install --ignore-installed prompt_toolkit
-                python -m pip install --ignore-installed python-can
-                python -m pip install --ignore-installed can-isotp  
+                sudo locale-gen en_US en_US.UTF-8
+                sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+                export LANG=en_US.UTF-8
+                sudo add-apt-repository universe
+                sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+                sudo apt update
+                sudo apt install -y ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ros2-install -> done" >> ~/my-cfn-init.log
         firefox-install:
           commands:
             firefox-install:
-              ignoreErrors: "false"
+              ignoreErrors: "true"
               command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] firefox-install -> start" >> ~/my-cfn-init.log
+
                 # install firefox browser
-                apt-get -q -y install firefox
+                sudo apt-get -q -y install firefox
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] firefox-install -> done" >> ~/my-cfn-init.log
+        nvidia-install:
+          commands:
+            nvidia-install:
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] nvidia-install -> start" >> ~/my-cfn-init.log
+
+                # Nvidia Drivers
+                sudo apt -q -y install ubuntu-drivers-common
+                sudo apt -q -y install $(nvidia-detector)
+
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] nvidia-install -> done" >> ~/my-cfn-init.log
         finalize-install:
           commands:
             finalize-install:
-              ignoreErrors: "false"
-              command: !Sub
-                - |
-                  # remove unsued package
-                  apt-get -y autoremove
+              ignoreErrors: "true"
+              command: |
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] finalize-install -> start" >> ~/my-cfn-init.log
 
-                  # check all process are running
-                  ps -edf | grep dcv
+                # install firefox browser
+                sudo apt-get -y autoremove
 
-                  # change the ubuntu user password using the secret
-                  echo "ubuntu:${PASSWORD}" | sudo chpasswd
+                ps -edf | grep dcv >> ~/my-cfn-init.log
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] finalize -> done" >> ~/my-cfn-init.log
 
-                - PASSWORD: "{{resolve:secretsmanager:Ec2InstanceCarlaSecret:SecretString:password}}"
     Properties:
       ImageId: !Ref ImageId
-      InstanceType: !Ref InstanceType
+      InstanceType: !Ref instanceType
       IamInstanceProfile: !Ref Ec2InstanceCarlaProfile
       Monitoring: true
       NetworkInterfaces:
@@ -675,20 +609,21 @@ Resources:
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeType: !Ref Ec2InstanceVolumeType
-            VolumeSize: !Ref Ec2InstanceVolumeSize
+            VolumeType: !Ref volumeType
+            VolumeSize: !Ref volumeSize
             DeleteOnTermination: true
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> start" >> ~/my-cfn-init.log > ~/my-cfn-init.log
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> start" >> ~/my-cfn-init.log
+
 
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> start" >> ~/my-cfn-init.log
           # https://stackoverflow.com/questions/33370297/apt-get-update-non-interactive
           export DEBIAN_FRONTEND=noninteractive
-          add-apt-repository ppa:deadsnakes/ppa -y
-          apt-get update
-          apt-get -q -y install python3 python3-dev python3-venv python3-distutils python3-pip python3-setuptools python-is-python3
+          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          sudo apt-get update
+          sudo apt-get -q -y install python3 python3-dev python3-venv python3-distutils python3-pip python3-setuptools python-is-python3
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> done" >> ~/my-cfn-init.log
               
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> start" >> ~/my-cfn-init.log
@@ -697,26 +632,26 @@ Resources:
           wget -nv https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-31.tar.gz
           tar -xvzf ./aws-cfn-bootstrap-py*
           cd aws-cfn-bootstrap-2.0
-          python3 setup.py build
-          python3 setup.py install
+          sudo python3 setup.py build
+          sudo python3 setup.py install
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> done" >> ~/my-cfn-init.log
 
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> start" >> ~/my-cfn-init.log
           # cfn-init
-          cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
+          sudo cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> done" >> ~/my-cfn-init.log
 
 
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> start" >> ~/my-cfn-init.log
           # cfn-init completed so signal success or not
-          cfn-signal -e $? --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
+          sudo cfn-signal -e $? --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> done" >> ~/my-cfn-init.log
 
           echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> done" >> ~/my-cfn-init.log
-          reboot
+          sudo reboot
       Tags:
         - Key: Name
-          Value: !Ref Ec2InstanceName
+          Value: !Ref ec2Name
         - Key: StackName
           Value: !Sub ${AWS::StackName}
         - Key: StackId
@@ -733,37 +668,20 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref BigaInstanceName
+
 Outputs:
-  CarlaSimulatorInstanceID:
-    Description: Carla Simulator EC2 Instance ID
+  InstanceID:
+    Description: EC2 Instance ID
     Value: !Ref Ec2InstanceCarla
-  CarlaSimulatorSecret:
-    Description: Carla Simulator OS user & password secret
-    Value: !Ref Ec2InstanceCarlaSecret
-  SSMSessionManagerURL:
-    Description: SSM Session Manager access link
+  SSMsessionManager:
+    Description: SSM Session Manager login ("sudo passwd ubuntu" to change password)
     Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager/session-manager/${Ec2InstanceCarla}
-  NICEDCVWebAccessConsoleURL:
-    Description: NICE DCV Web Access Console
-    # Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager:8443
-    Value: !Join
-      - ""
-      - - "https://"
-        - !GetAtt
-          - Ec2InstanceCarla
-          - PublicDnsName
-        - :8443
-  NICEDCVClientConnectionString:
-    Description: NICE DCV Client Connection String
-    Value: !Join
-      - ""
-      - - !GetAtt
-          - Ec2InstanceCarla
-          - PublicDnsName
-        - :8443
-  NICEDCVClientDownloadURL:
+  DCVdownload:
     Description: DCV client download
     Value: https://download.nice-dcv.com
+  CARLAinstall:
+    Description: Command to download and install CARLA
+    Value: /home/ubuntu/install-carla
   CARLApath:
     Description: CARLA installation target path
     Value: /opt/carla-simulator/
