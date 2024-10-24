@@ -26,10 +26,14 @@ First you will need to set some environement variable and clone the Git reposito
 
 ```sh
 export CARLA_VERSION=0.9.13
-export REPO_URL=https://github.com/aws4embeddedlinux/demo-iot-automotive-simulator
+export REPO_URL=https://github.com/adadouche/demo-iot-automotive-simulator
+export OS_USER=ubuntu
+```
 
-mkdir -p /home/ubuntu/
-cd /home/ubuntu/Desktop
+
+```sh
+mkdir -p /home/${OS_USER}/
+cd /home/${OS_USER}/Desktop
 git clone ${REPO_URL}
 ```
 
@@ -75,7 +79,7 @@ unzip -q -o awscliv2.zip
 ./aws/install --update -b /usr/bin
 
 rm -f /tmp/awscliv2.zip
-echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/ubuntu/.bashrc
+echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/${OS_USER}/.bashrc
 ```
 
 [Bask to the top](#table-of-contents)
@@ -180,16 +184,16 @@ crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints" "['0.0.0.0
 crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
 
 # crudini --set /etc/dcv/dcv.conf "session-management" "create-session" "false"
-# crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
+# crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "${OS_USER}"
 
 # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-mkdir -p /home/ubuntu/DCV-Storage
-chown -R ubuntu:ubuntu /home/ubuntu/DCV-Storage
+mkdir -p /home/${OS_USER}/DCV-Storage
+chown -R ${OS_USER}:${OS_USER} /home/${OS_USER}/DCV-Storage
 
 # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
 tee /opt/dcv-virtual-session.sh > /dev/null << EOF
 #!/bin/bash
-dcvUser=ubuntu
+dcvUser=${OS_USER}
 while true;
 do
     if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
@@ -279,7 +283,7 @@ python -m pip install --upgrade pip
 python -m pip install --ignore-installed carla==${CARLA_VERSION}
 python -m pip install --ignore-installed -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
 
-chown -R "ubuntu:ubuntu" /opt/carla-simulator
+chown -R "${OS_USER}:${OS_USER}" /opt/carla-simulator
 ```
 
 [Bask to the top](#table-of-contents)
@@ -307,27 +311,27 @@ export CARLA_ROOT=/opt/carla-simulator/
 export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-${CARLA_VERSION}-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
 source /opt/ros/galactic/setup.bash
 
-mkdir -p /home/ubuntu/ros2_ws/src 
-cd /home/ubuntu/ros2_ws/src
+mkdir -p /home/${OS_USER}/ros2_ws/src 
+cd /home/${OS_USER}/ros2_ws/src
 git clone https://github.com/astuff/astuff_sensor_msgs.git
 
-cd /home/ubuntu/ros2_ws
+cd /home/${OS_USER}/ros2_ws
 colcon build --symlink-install
-source /home/ubuntu/ros2_ws/install/setup.bash
+source /home/${OS_USER}/ros2_ws/install/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 
-cd /home/ubuntu/ros2_ws/src
+cd /home/${OS_USER}/ros2_ws/src
 git clone https://github.com/carla-simulator/ros-bridge.git ros-bridge
-cd /home/ubuntu/ros2_ws/src/ros-bridge
+cd /home/${OS_USER}/ros2_ws/src/ros-bridge
 git submodule update --init --recursive
 
 rosdep update
 
-cd /home/ubuntu/ros2_ws
+cd /home/${OS_USER}/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 
-chown -R "ubuntu:ubuntu" /home/ubuntu/ros2_ws
+chown -R "${OS_USER}:${OS_USER}" /home/${OS_USER}/ros2_ws
 ```
 
 [Bask to the top](#table-of-contents)
@@ -336,18 +340,18 @@ chown -R "ubuntu:ubuntu" /home/ubuntu/ros2_ws
 
 ```sh
 # cloning the repository
-mkdir -p /home/ubuntu/
-cd /home/ubuntu/Desktop
+mkdir -p /home/${OS_USER}/
+cd /home/${OS_USER}/Desktop
 git clone ${REPO_URL}
 
-cd /home/ubuntu/Desktop/demo-iot-automotive-simulator/socket-can-setup
+cd /home/${OS_USER}/Desktop/demo-iot-automotive-simulator/socket-can-setup
 sudo cp setup-socketcan.sh /usr/bin
 sudo cp setup-socketcan.service /lib/systemd/system
 
 systemctl start setup-socketcan
 systemctl enable setup-socketcan
 
-chown -R "ubuntu:ubuntu" /home/ubuntu/Desktop
+chown -R "${OS_USER}:${OS_USER}" /home/${OS_USER}/Desktop
 ```
 
 [Bask to the top](#table-of-contents)
@@ -355,14 +359,14 @@ chown -R "ubuntu:ubuntu" /home/ubuntu/Desktop
 ## Breeze
 
 ```sh
-cd /home/ubuntu/Desktop/demo-iot-automotive-simulator/socket-can-setup
+cd /home/${OS_USER}/Desktop/demo-iot-automotive-simulator/socket-can-setup
 sudo cp setup-socketcan.sh /usr/bin
 sudo cp setup-socketcan.service /lib/systemd/system
 
 systemctl start setup-socketcan
 systemctl enable setup-socketcan
 
-chown -R "ubuntu:ubuntu" /home/ubuntu/Desktop
+chown -R "${OS_USER}:${OS_USER}" /home/${OS_USER}/Desktop
 ```
 
 [Bask to the top](#table-of-contents)
