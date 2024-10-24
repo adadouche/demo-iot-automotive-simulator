@@ -53,7 +53,7 @@ Parameters:
   Ec2InstanceName:
     Description: Name of the EC2 instance hosting the Carla Simulator.
     Type: String
-    Default: Ubuntu-CARLA-NICE-DCV
+    Default: Ubuntu-CARLA-DCV
   Ec2InstanceVolumeType:
     Type: String
     Description: Volume Type ( https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html )
@@ -262,6 +262,16 @@ Resources:
         - Key: Name
           Value: !Sub "[${AWS::StackName}] - Biga Security Group"
 
+  Ec2InstanceCarlaSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "ubuntu"}'
+        GenerateStringKey: password
+        ExcludeCharacters: "`'\"@/\\;,"
+        PasswordLength: 32
+
   Ec2InstanceCarlaIamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -283,6 +293,17 @@ Resources:
                 Action:
                   - s3:GetObject
                 Resource: !Sub arn:${AWS::Partition}:s3:::dcv-license.${AWS::Region}/*
+        - PolicyName: secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:ListSecret*
+                Resource: !Ref Ec2InstanceCarlaSecret
       ManagedPolicyArns:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
       Tags:
@@ -313,16 +334,6 @@ Resources:
       Description: "Network interface for Ec2InstanceBiga"
       GroupSet:
         - !Ref BigaSecurityGroup
-
-  Ec2InstanceCarlaSecret:
-    Type: "AWS::SecretsManager::Secret"
-    Properties:
-      Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "ubuntu"}'
-        GenerateStringKey: password
-        ExcludeCharacters: "`'\"@/\\;,"
-        PasswordLength: 32
 
   Ec2InstanceCarla:
     Type: AWS::EC2::Instance
@@ -355,22 +366,24 @@ Resources:
               ignoreErrors: "false"
               command: |
                 add-apt-repository ppa:deadsnakes/ppa -y
-                apt-get update
-                apt-get -q -y install python3
-                apt-get -q -y install python3-dev
-                apt-get -q -y install python3-venv
-                apt-get -q -y install python3-distutils
-                apt-get -q -y install python3-pip
-                apt-get -q -y install python3-setuptools
-                apt-get -q -y install python-is-python3
-                apt-get -q -y install locales
-                apt-get -q -y install software-properties-common
-                apt-get -q -y install wget
-                apt-get -q -y install tmux
-                apt-get -q -y install unzip
-                apt-get -q -y install tar
-                apt-get -q -y install curl
-                apt-get -q -y install sed
+                apt-get -qq -y update
+                apt-get -qq -y install python3
+                apt-get -qq -y install python3-dev
+                apt-get -qq -y install python3-venv
+                apt-get -qq -y install python3-distutils
+                apt-get -qq -y install python3-pip
+                apt-get -qq -y install python3-setuptools
+                apt-get -qq -y install python-is-python3
+                apt-get -qq -y install locales
+                apt-get -qq -y install software-properties-common
+                apt-get -qq -y install wget
+                apt-get -qq -y install tmux
+                apt-get -qq -y install unzip
+                apt-get -qq -y install tar
+                apt-get -qq -y install curl
+                apt-get -qq -y install sed
+                apt-get -qq -y install jq
+                apt-get -qq -y install whois
         awscli-install:
           commands:
             awscli-install:
@@ -379,9 +392,9 @@ Resources:
                 cd /tmp
                 rm -f /tmp/awscliv2.zip
                 if (uname -a | grep x86 1>/dev/null); then
-                  curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+                  curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
                 else
-                  curl https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
+                  curl -s https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
                 fi
                 unzip -q -o awscliv2.zip
                 ./aws/install --update -b /usr/bin
@@ -393,9 +406,9 @@ Resources:
             nvidia-install:
               ignoreErrors: "false"
               command: |
-                # Nvidia Drivers
-                apt-get -q -y install ubuntu-drivers-common
-                apt-get -q -y install $(nvidia-detector)
+                # NVIDIA Drivers installation
+                apt-get -qq -y install ubuntu-drivers-common
+                apt-get -qq -y install $(nvidia-detector)
 
                 nvidia-xconfig --preserve-busid --enable-all-gpus
         dcv-install-prerequisites:
@@ -407,15 +420,15 @@ Resources:
                 systemctl isolate graphical.target
                 systemctl set-default graphical.target
 
-                apt-get -q -y install ubuntu-desktop
-                apt-get -q -y install gdm3
-                apt-get -q -y install pulseaudio-utils
-                apt-get -q -y install libssl1.1
-                apt-get -q -y install mesa-utils
-                apt-get -q -y install xserver-xorg-video-dummy
+                apt-get -qq -y install ubuntu-desktop
+                apt-get -qq -y install gdm3
+                apt-get -qq -y install pulseaudio-utils
+                apt-get -qq -y install libssl1.1
+                apt-get -qq -y install mesa-utils
+                apt-get -qq -y install xserver-xorg-video-dummy
 
                 # resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
-                apt-get -q -y install dpkg-dev
+                apt-get -qq -y install dpkg-dev
 
                 pip3 install crudini
                 crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
@@ -434,30 +447,30 @@ Resources:
                 cd /tmp
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
-                wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
+                wget -q https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
                 gpg --import NICE-GPG-KEY  
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
 
                 rm -f /tmp/nice-dcv-*.tgz
                 if ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 22.04 1>/dev/null)); then
-                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                  wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
+                  tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
                 elif ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 18.04 1>/dev/null)); then
-                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                  wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
+                  tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
                 elif (cat /etc/os-release | grep 18.04 1>/dev/null); then
-                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
+                  wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
+                  tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
                 else
-                  wget -nv https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
-                  tar -xvzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
+                  wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
+                  tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
                 fi
 
-                apt-get -q -y install ./nice-dcv-server_*.deb
-                apt-get -q -y install ./nice-dcv-web-viewer_*.deb
+                apt-get -qq -y install ./nice-dcv-server_*.deb
+                apt-get -qq -y install ./nice-dcv-web-viewer_*.deb
                 usermod -aG video dcv
-                apt-get -q -y install ./nice-xdcv_*.deb
+                apt-get -qq -y install ./nice-xdcv_*.deb
 
                 # dcvstartx &
                 # pkill dcvstartx
@@ -537,20 +550,20 @@ Resources:
               ignoreErrors: "false"
               command: !Sub
                 - |
-                  apt-get -q -y install libomp5
-                  apt-get -q -y install can-utils
-                  apt-get -q -y install socat
-                  apt-get -q -y install linux-modules-extra-$(uname -r)
+                  apt-get -qq -y install libomp5
+                  apt-get -qq -y install can-utils
+                  apt-get -qq -y install socat
+                  apt-get -qq -y install linux-modules-extra-$(uname -r)
 
                   export CARLA_VERSION=${CARLA_VERSION}
 
                   mkdir -p /opt/carla-simulator/
                   cd /opt/carla-simulator/
-                  wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_$CARLA_VERSION.tar.gz
+                  wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CARLA_VERSION}.tar.gz
                   tar -xzvf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
 
                   python -m pip install --upgrade pip
-                  python -m pip install --ignore-installed carla==$CARLA_VERSION
+                  python -m pip install --ignore-installed carla==${CARLA_VERSION}
                   python -m pip install --ignore-installed -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
 
                   # chmod -R a+rwx /opt/carla-simulator
@@ -563,8 +576,6 @@ Resources:
               ignoreErrors: "false"
               command: !Sub
                 - |
-                  CARLA_VERSION=${CARLA_VERSION}
-
                   locale-gen en_US en_US.UTF-8
                   update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
                   export LANG=en_US.UTF-8
@@ -573,39 +584,44 @@ Resources:
                   curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
                   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
-                  apt-get update
+                  apt-get -qq -y update
 
-                  apt-get -q -y install ros-galactic-desktop
-                  apt-get -q -y install ros-dev-tools
+                  apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
 
-                  apt-get -q -y install python3-rosdep2
-                  apt-get -q -y install python3-colcon-common-extensions
+                  rm -rf /home/ubuntu/venv
+                  python -m venv /home/ubuntu/venv
+                  source /home/ubuntu/venv/bin/activate
+                  python -m pip install --ignore-installed pyyaml
+                  python -m pip install --ignore-installed setuptools==58.2.0
 
                   export CARLA_ROOT=/opt/carla-simulator/
-                  export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-$CARLA_VERSION-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
+                  export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-${CARLA_VERSION}-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
+                  export PYTHONWARNINGS=ignore:::setuptools.command.install,ignore:::setuptools.command.easy_install,ignore:::pkg_resources
+
                   source /opt/ros/galactic/setup.bash
 
                   mkdir -p /home/ubuntu/ros2_ws/src 
-                  cd /home/ubuntu/ros2_ws/src
-                  git clone https://github.com/astuff/astuff_sensor_msgs.git
-
                   cd /home/ubuntu/ros2_ws
-                  colcon build --symlink-install
-                  source /home/ubuntu/ros2_ws/install/setup.bash
-                  rosdep install --from-paths src --ignore-src -r -y
 
-                  cd /home/ubuntu/ros2_ws/src
-                  git clone https://github.com/carla-simulator/ros-bridge.git ros-bridge
-                  cd /home/ubuntu/ros2_ws/src/ros-bridge
-                  git submodule update --init --recursive
+                  git clone https://github.com/astuff/astuff_sensor_msgs.git /home/ubuntu/ros2_ws/src 
 
                   rosdep update
-
-                  cd /home/ubuntu/ros2_ws
-                  rosdep install --from-paths src --ignore-src -r -y
+                  rosdep install --from-paths src --ignore-src -r
                   colcon build --symlink-install
 
+                  git clone --recurse-submodules https://github.com/carla-simulator/ros-bridge.git /home/ubuntu/ros2_ws/src/ros-bridge
+
+                  rosdep update
+                  rosdep install --from-paths src --ignore-src -r
+                  colcon build --symlink-install
+
+
+                  source /home/ubuntu/ros2_ws/install/setup.bash
+                  rosdep update
+                  rosdep install --from-paths src --ignore-src -r -y
+
                   chown -R "ubuntu:ubuntu" /home/ubuntu/ros2_ws
+                  chown -R "ubuntu:ubuntu" /home/ubuntu/venv
                 - CARLA_VERSION: !Ref CarlaVersion
         socketcan-install:
           commands:
@@ -633,42 +649,39 @@ Resources:
             carla-install:
               ignoreErrors: "false"
               command: |
-                apt-get -q -y install python3-pyqt5  
-                apt-get -q -y install pyqt5-dev-tools
-                apt-get -q -y install qttools5-dev-tools
-
+                apt-get -qq -y install python3-pyqt5  
+                apt-get -qq -y install pyqt5-dev-tools
+                apt-get -qq -y install qttools5-dev-tools
         canigen-install:
           commands:
             carla-install:
               ignoreErrors: "false"
               command: |
-                python -m pip install --ignore-installed cantools                 
+                python -m pip install --ignore-installed cantools
                 python -m pip install --ignore-installed prompt_toolkit
                 python -m pip install --ignore-installed python-can
-                python -m pip install --ignore-installed can-isotp  
+                python -m pip install --ignore-installed can-isotp
         firefox-install:
           commands:
             firefox-install:
               ignoreErrors: "false"
               command: |
                 # install firefox browser
-                apt-get -q -y install firefox
+                apt-get -qq -y install firefox
         finalize-install:
           commands:
             finalize-install:
               ignoreErrors: "false"
-              command: !Sub
-                - |
-                  # remove unsued package
-                  apt-get -y autoremove
+              command: !Sub |
+                # remove unsued package
+                apt-get -qq -y autoremove
 
-                  # check all process are running
-                  ps -edf | grep dcv
+                # check all process are running
+                ps -edf | grep dcv
 
-                  # change the ubuntu user password using the secret
-                  echo "ubuntu:${PASSWORD}" | sudo chpasswd
-
-                - PASSWORD: "{{resolve:secretsmanager:Ec2InstanceCarlaSecret:SecretString:password}}"
+                # change the ubuntu user password using the secret
+                PASSWORD=$(aws --region "${AWS::Region}" secretsmanager get-secret-value --secret-id "${Ec2InstanceCarlaSecret}" --query 'SecretString' | jq -r '. | fromjson | .password')
+                echo "ubuntu:$PASSWORD" | sudo chpasswd
     Properties:
       ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
@@ -686,38 +699,32 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> start" >> ~/my-cfn-init.log > ~/my-cfn-init.log
-
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> start" >> ~/my-cfn-init.log
           # https://stackoverflow.com/questions/33370297/apt-get-update-non-interactive
           export DEBIAN_FRONTEND=noninteractive
           add-apt-repository ppa:deadsnakes/ppa -y
-          apt-get update
-          apt-get -q -y install python3 python3-dev python3-venv python3-distutils python3-pip python3-setuptools python-is-python3
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install python -> done" >> ~/my-cfn-init.log
-              
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> start" >> ~/my-cfn-init.log
+          apt-get -qq -y update
+          apt-get -qq -y install python3 
+          apt-get -qq -y install python3-dev 
+          apt-get -qq -y install python3-venv 
+          apt-get -qq -y install python3-distutils 
+          apt-get -qq -y install python3-pip 
+          apt-get -qq -y install python3-setuptools
+          apt-get -qq -y install python-is-python3
+
           cd /tmp
           # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/releasehistory-aws-cfn-bootstrap.html
-          wget -nv https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-31.tar.gz
-          tar -xvzf ./aws-cfn-bootstrap-py*
+          wget -q https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-31.tar.gz
+          tar -xzf ./aws-cfn-bootstrap-py*
           cd aws-cfn-bootstrap-2.0
           python3 setup.py build
           python3 setup.py install
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> install cfn-bootstrap -> done" >> ~/my-cfn-init.log
 
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> start" >> ~/my-cfn-init.log
           # cfn-init
           cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-init -> done" >> ~/my-cfn-init.log
 
-
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> start" >> ~/my-cfn-init.log
           # cfn-init completed so signal success or not
           cfn-signal -e $? --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> call cfn-signal -> done" >> ~/my-cfn-init.log
 
-          echo "[$(date '+%Y-%m-%d %H:%M:%S')] UserData -> done" >> ~/my-cfn-init.log
           reboot
       Tags:
         - Key: Name

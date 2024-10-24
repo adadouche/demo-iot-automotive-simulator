@@ -1,14 +1,28 @@
-# CARLA Simulator Ubuntu 22.04 + NICE DCV + GPU
+# CARLA Simulator Ubuntu 22.04 on Amazon EC2 + Amazon DCV + GPU
+
+## Table of Contents
+
+1. [Introduction](#introduction)
+1. [Deployment instructions](#deployment-instructions)
+1. [Run the CARLA Simulator](#run-the-carla-simulator)
+1. [Troubleshooting](#troubleshooting)
+1. [Security](#security)
+1. [License](#license)
+1. [Credits](#credits)
+
+## Introduction 
 
 This [AWS CloudFormation](https://aws.amazon.com/cloudformation/) template will deploy [CARLA Simulator](https://carla.org/) into an accelerated computing instance running the [NICE DCV](https://aws.amazon.com/hpc/dcv/) server.
 
 ![CARLA Animation](images/carla-ubuntu-2204.gif "CARLA Animation")
 
-## CARLA
+### CARLA Simulator
 
 CARLA is an open-source simulator for autonomous driving research to support the development, training, and validation of autonomous driving systems.
 
-## NICE DCV
+For more information about CARLA you can refere to : https://carla.org/ 
+
+### Amazon DCV
 
 ![Architecture](images/arch.png "Architecture")
 
@@ -20,25 +34,27 @@ Once the tunnel is setup, the NICE DCV client can connect to the instance using 
 
 You will need to set the ***Connection Setting*** to be ***WebSockets/TCP*** instead of ***QUIC***.
 
-###### NICE DCV with unicast
-
+>
+>
+> ### Amazon DCV with unicast
+>
 > Be aware that the unicast setup does not support UDP multicasting.
-
-To use the simplified architecture without Transit Gateway, follow these steps:
-
-1. Configure both the device simulator and CARLA for unicast when using ROS2.
-1. Find the example configuration for `cyclonedds` at: `carla-client/ros2/cyclonedds_unicast.yaml`.
-1. Before running the ROS2 example, set the `CYCLONEDDS_URI` environment variable with this command:
- 
-   ```
-   export CYCLONEDDS_URI=carla-client/ros2/cyclonedds_unicast.yaml
-   ```
-
-1. using ***`template-unicast.yml`*** as a *CloudFormation* template instead of ***`template.yml`***
+>
+>To use the simplified architecture without Transit Gateway, follow these steps:
+>
+>1. Configure both the device simulator and CARLA for unicast when using ROS2.
+>1. Find the example configuration for `cyclonedds` at: `carla-client/ros2/cyclonedds_unicast.yaml`.
+>1. Before running the ROS2 example, set the `CYCLONEDDS_URI` environment variable with this command:
+>  ```sh
+>     export CYCLONEDDS_URI=carla-client/ros2/cyclonedds_unicast.yaml
+>  ```
+>4. use ***`template-unicast.yml`*** as a *CloudFormation* template instead of ***`template.yml`***
 
 ## Deployment instructions
 
-### Prerequisites:
+### Prerequisites
+
+In order to properly deploy the stack and access the environment, you will need to complete the following stpes on your local machine.
 
 #### Session Manager plugin
 
@@ -82,37 +98,45 @@ chmod +x get-ami-id.sh
 echo -e "The Biga AMI ID is : $(./get-ami-id.sh)"
 ```
 
-### Deploy the CloudFormation Stack
+-----
 
-Download desired template file **[template.yml](template.yml)** (or **[template-unicast.yml](template-unicast.yml)**).
+### Deploying the CloudFormation Stack
 
-Login into the AWS [CloudFormation console](https://console.aws.amazon.com/cloudformation/home#/stacks/create/template). 
+Download the template file **[template.yml](template.yml)** (or **[template-unicast.yml](template-unicast.yml)** for the unicast option).
 
-Choose **Create Stack** and **Upload** the template file.
+Login into the AWS [CloudFormation console](https://console.aws.amazon.com/cloudformation/home#/stacks/create/template).
 
-Specify a **Stack name** like **`demo-iot-automotive-simulator`**
+Click on **Create Stack** the select **With new ressources (standard)**. 
 
-![CloudFormation parameters](images/cloudformation-parameters.png "Parameters")
+Keep **Chooses an existing template** selected and then select **Upload a template file**.
 
-Specify the parameter values (all fields are required):
+Clicke on the **Choose file** button, a popup will appear to browse your local machine and select the CloudFormation template to be used.
+
+Once the template is selected clicnk on **Next**.
+
+![CloudFormation template](images/cloudformation-template.png "template")
+
+Specify a **Stack name** like **`demo-iot-automotive-simulator`** and the following parameter values (all fields are required):
 
 | Parameter Name       | Description | Default value |
 |----------------------|-------------|---------------|
 | **ImageId**          | [System Manager Parameter](https://aws.amazon.com/blogs/compute/using-system-manager-parameter-as-an-alias-for-ami-id/) path to AMI ID. | /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
 | **InstanceType**     | appropriate [instance type](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html). | g5.16xlarge | 
-| **Ec2InstanceName**        | Name of the EC2 instance hosting the Carla Simulator. | Ubuntu-CARLA-NICE-DCV
+| **Ec2InstanceName**        | Name of the EC2 instance hosting the Carla Simulator. | Ubuntu-CARLA-DCV
 | **Ec2InstanceVolumeType**  | EBS volume type. | gp3
 | **Ec2InstanceVolumeSize**  | EBS volume size (in GB). | 40
-| **BigaAmiId**              | AMI of the EC2 image for the Biga device as determined in [Get the Biga AMI ID](#get-the-biga-ami-id) | `to be provided`
+| **BigaAmiId**              | AMI of the EC2 image for the Biga device as determined in [Get the Biga AMI ID](#get-the-biga-ami-id) | `specific to your current environment`
 | **BigaInstanceType** | Instance type of the Biga device. | t4g.micro
 | **BigaInstanceName** | Name of the Biga device. | Biga
-| **AllowedIP** | an IP address CIDR range that will be allow listed to access the Carla Simulator via a security group rule |  `to be provided`
+| **AllowedIP** | an IP address CIDR range that will be allow listed to access the Carla Simulator via a security group rule |  `specific to your current environment`
 | **CarlaVersion** | The carla simulator version to be installed | 0.9.13
 
 
-Click on **Next** until you click **Submit** to launch your stack creation.
+![CloudFormation parameters](images/cloudformation-parameters.png "Parameters")
 
-> It may take up to 60 minutes to provision the EC2 instance. 
+Click on **Next** until you can to click **Submit** to launch the stack creation.
+
+> It may take up to 60 minutes to provision the stack, which mostly due to the Carla instance creation where a series of softwares needs to be installed and configured. 
 
 After your stack has been successfully created, its status changes to **CREATE\_COMPLETE**. 
 
@@ -120,9 +144,19 @@ Now, go to the **Outputs** tab.
 
 ![CloudFormation outputs](images/cloudformation-outputs.png "Outputs")
 
-### Get the Carla Simulator user & password from AWS Secrets Manager
+### Get the Carla Simulator Ubuntu user password from AWS Secrets Manager
 
 On the **Outputs** tab, locate the entry named **`CarlaSimulatorSecret`**.
+
+You can now execute the following command to retrieve the Ubuntu user password stored in the secret:
+
+```sh
+STACK_NAME=demo-iot-automotive-simulator
+
+secret_arn=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --output text --query "Stacks[0].Outputs[?OutputKey=='CarlaSimulatorSecret'].OutputValue")
+
+aws secretsmanager get-secret-value --secret-id $secret_arn --query 'SecretString' | jq -r '. | fromjson | .password'
+```
 
 ### Access the Carla Simulator instance via AWS System Manager Session Manager
 
@@ -144,7 +178,7 @@ The URL should look like this : *`https://<carla simulator pulic dns>:8443`*
 
 For more information, check the [Amazon DCV Web browser client](https://docs.aws.amazon.com/dcv/latest/userguide/client-web.html) documentation.
 
-### Access the Carla Simulator instance via Amazon DCV client
+### Access the Carla Simulator instance via the Amazon DCV client
 
 Install the Amazon DCV client of you current operating system from the [Amazon DCV Dowloads](https://www.amazondcv.com/latest.html) page.
 
@@ -154,46 +188,119 @@ Once installed, start the Amazon DCV client :
 
 From the **Outputs** tab in the CloudFormation stack, locate the entry named **`NICEDCVClientConnectionString`** and paste it in the Amazon DCV client.
 
-### Testing the PythonAPI
+The Amazon DCV client will allow more feature compare to the Amazon DCV web browser client.
 
-The best way to test the Python API is to drive a car. In order to do so, you will have to follow the steps below:
 
-- Start the server "/opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia" in different terminal
+[Bask to the top](#table-of-contents)
 
-1. Activate the virtual environment created by the installation with the command ". venv/bin/activate" from the "ubuntu" user's home.
-2. Navigate to the PythonAPI examples folder "cd /opt/carla-simulator/PythonAPI/examples".
-3. Run "python manual\_control.py".
+## Run the CARLA Simulator with manual control
 
-Here is the link to the complete [CARLA documentation](https://carla.readthedocs.io/en/0.9.13/)
+Now, you can start driving !!! 
+
+In order to do so, you will have to follow the steps below:
+
+- Open an Amazon DCV session (either through the web client or the locl client)
+- Open a new terminal and execute the following command:
+
+    ```sh
+    /opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia
+    ```
+
+- Open a new terminal and execute the following commands:
+
+    ```sh
+    cd /opt/carla-simulator/PythonAPI/examples
+    python manual_control.py
+    ```
 
 ![CARLA PythonAPI](images/carla-manual-conrtrol.png "CARLA PythonAPI")
 
-## Testing vcan connection to biga ec2 device
-Running this on the biga ec2 instance, connect via EC2 serial console. Stop after test - "ctrl-c".
+You can use the arrow to control the car.
+
+Here is the keyboard mapping for the car:
+
 ```
+    W            : throttle
+    S            : brake
+    A/D          : steer left/right
+    Q            : toggle reverse
+    Space        : hand-brake
+    P            : toggle autopilot
+    M            : toggle manual transmission
+    ,/.          : gear up/down
+    CTRL + W     : toggle constant velocity mode at 60 km/h
+
+    L            : toggle next light type
+    SHIFT + L    : toggle high beam
+    Z/X          : toggle right/left blinker
+    I            : toggle interior light
+
+    TAB          : change sensor position
+    ` or N       : next sensor
+    [1-9]        : change to sensor [1-9]
+    G            : toggle radar visualization
+    C            : change weather (Shift+C reverse)
+    Backspace    : change vehicle
+
+    O            : open/close all doors of vehicle
+    T            : toggle vehicle's telemetry
+
+    V            : Select next map layer (Shift+V reverse)
+    B            : Load current selected map layer (Shift+B to unload)
+
+    R            : toggle recording images to disk
+
+    CTRL + R     : toggle recording of simulation (replacing any previous)
+    CTRL + P     : start replaying last recorded simulation
+    CTRL + +     : increments the start time of the replay by 1 second (+SHIFT = 10 seconds)
+    CTRL + -     : decrements the start time of the replay by 1 second (+SHIFT = 10 seconds)
+
+    F1           : toggle HUD
+    H/?          : toggle help
+    ESC          : quit
+```
+
+## Troubleshooting 
+
+### Testing vCan connection to Biga EC2 instance
+
+Open [EC2 console ](https://console.aws.amazon.com/ec2/home?#Instances:instanceState=running).
+
+Select the instance named **Biga**, then click on **Connect**.
+
+Select the **EC2 Serial Console** tab and click on **Connect**. 
+
+> You might be required to activate activate the EC2 Serial Console in your account before being able to use it
+
+In the **EC2 Serial Console** terminal for the **Biga** instance, execute the following command:
+
+```sh
 candump vcan0
 ```
 
-Running this on the Carla ec2 instance, in a terminal.
+Now connect to the **Ubuntu-CARLA-DCV** using **SSM Session Manager** or via **Amazon DCV**.
 
-```
-./multicast_can_send.sh
-```
+> To connect via **SSM Session Manager** , you can either use the link from the CloudFormation stack ouput or use the [EC2 console ](https://console.aws.amazon.com/ec2/home?#Instances:instanceState=running) **Connect** button.
 
-Running this on the Carla ec2 instance, in another terminal.
+In the terminal for the **Ubuntu-CARLA-DCV** instance, execute the following commands:
 
-
-```
+```sh
+cd /home/ubuntu/Desktop/demo-iot-automotive-simulator
+./multicast_can_send.sh &
 cansend vcan0 123#00FFAA5501020304
 ```
 
-You should see this in the biga ec2 instance:
+Switch back to **EC2 Serial Console** terminal for the **Biga** instance where you should see the following :
 
 ```
-root@ip-10-0-1-93:~# candump vcan0
+root@ip-xxxxxxxxxxx:~# candump vcan0
 vcan0  123   [8]  00 FF AA 55 01 02 03 04
-
 ```
+
+You now use "ctrl-c" to exit from the candump.
+
+
+[Bask to the top](#table-of-contents)
 
 ## Security
 
@@ -206,3 +313,5 @@ This library is licensed under the MIT-0 License. See the LICENSE file.
 ## Credits
 
 This AWS CloudFormation template has been made possible by using as a reference the [Amazon EC2 NICE DVC Samples](https://github.com/aws-samples/amazon-ec2-nice-dcv-samples).
+
+[Bask to the top](#table-of-contents)

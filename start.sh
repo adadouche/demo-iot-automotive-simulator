@@ -20,12 +20,26 @@ start_process() {
     echo $! # Return the PID
 }
 
+killit() {
+    search_string=$1
+    echo "killing ${search_string}..."
+    kill $(ps aux | grep '${search_string}' | awk '{print $2}') > /dev/null 2>&1
+}
+
 # Function to kill all process groups
 cleanup() {
     echo "Cleaning up..."
     for pid in "${pids[@]}"; do
         kill -- -$pid  # Kills the entire process group
     done
+    pkill CarlaUE4
+    killit 'multicast_can_send.sh'
+    killit 'CarlaUE4.sh'
+    killit 'manual_control_steeringwheel.py'
+    killit 'generate_traffic.py'
+    killit 'carla_ros_bridge.launch.py'
+    killit 'carla_spawn_objects.launch.py'
+    killit 'image_converter.py'
 }
 
 # Trap script termination signals to cleanup
@@ -33,6 +47,7 @@ trap cleanup EXIT SIGINT SIGTERM
 
 # Main execution
 main() {
+    cleanup
     # Array to store process group IDs
     declare -a pids
 
@@ -64,7 +79,7 @@ main() {
     log "pids: $pids"
 
     cd carla-client/ros2
-    pids+=($(start_process "python3 ./image_converter.py --input_topic /carla/ego_vehicle/rgb_front/image --output_topic /carla/ego_vehicle/rgb_front/compressed_image" "../../$log_dir/image_conv1.log"))
+    pids+=($(start_process "python3 ./image_converter.py --input_topic /carla/ego_vehicle/rgb_front/image   --output_topic /carla/ego_vehicle/rgb_front/compressed_image" "../../$log_dir/image_conv1.log"))
     pids+=($(start_process "python3 ./image_converter.py --input_topic /carla/ego_vehicle/depth_front/image --output_topic /carla/ego_vehicle/depth_front/compressed_image" "../../$log_dir/image_conv2.log"))
     cd ../../
     log "pids: $pids"
