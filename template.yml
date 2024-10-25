@@ -732,7 +732,8 @@ Resources:
                     cantools \
                     prompt_toolkit\
                     python-can\
-                    can-isotp
+                    can-isotp \
+                    opencv-python
                 EOF
             14-firefox-install:
               ignoreErrors: "false"

@@ -1,5 +1,7 @@
 # CARLA Simulator Ubuntu 22.04 on Amazon EC2 + Amazon DCV + GPU
 
+> If you are looking for instructions to setup this environment on a physical hardware, you can refer to the [manual install][./docs/manual-install.md] page.
+
 ## Table of Contents
 
 1. [Introduction](#introduction)
@@ -10,7 +12,7 @@
 1. [License](#license)
 1. [Credits](#credits)
 
-## Introduction 
+## Introduction
 
 This [AWS CloudFormation](https://aws.amazon.com/cloudformation/) template will deploy [CARLA Simulator](https://carla.org/) into an accelerated computing instance running the [NICE DCV](https://aws.amazon.com/hpc/dcv/) server.
 
@@ -271,6 +273,8 @@ cd ~/demo-iot-automotive-simulator
 
 ## Run the CARLA Simulator with steering wheel and with CAN integration
 
+> This will only work with USB Remotisation which is only available via the Amazon Client consle not via the web client.
+
 In a new terminal as your target user, execute the following commands:
 
 ```sh
@@ -280,6 +284,7 @@ cd ~/demo-iot-automotive-simulator
 
 > The tested steering configuration if for a **Logitech G29**.
 > You will need to adapt the confirguration located in the [wheel_config.ini][./carla_client/wheel_config.ini] file for other models and possibly the code in [manual_control_steeringwheel.py](./carla_client/manual_control_steeringwheel.py).
+> Please consult the following link for more details : https://docs.aws.amazon.com/dcv/latest/adminguide/manage-usb-remote.html
 
 ## Troubleshooting 
 
