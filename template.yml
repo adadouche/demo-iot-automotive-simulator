@@ -16,6 +16,7 @@ Metadata:
           - InstanceType
           - Ec2InstanceVolumeSize
           - Ec2InstanceVolumeType
+          - Ec2InstanceUserName
       - Label:
           default: Biga Instance configuration
         Parameters:
@@ -65,6 +66,10 @@ Parameters:
     Type: Number
     Description: Volume Size in GiBs (must be equal or larger than snapshot size)
     Default: 40
+  Ec2InstanceUserName:
+    Description: the OS username to be created on the Carla Simulator.
+    Type: String
+    Default: biga
   BigaAmiId:
     Type: AWS::EC2::Image::Id
     Description: The Biga ami image id
@@ -86,7 +91,7 @@ Parameters:
   RepositoryURL:
     Type: String
     Description: The demo-iot-automotive-simulator github repository URL
-    Default: https://github.com/aws4embeddedlinux/demo-iot-automotive-simulator
+    Default: https://github.com/adadouche/demo-iot-automotive-simulator
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -156,7 +161,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref VPCInternetGateway
-  PublicRouteTable:
+  VPCPublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
@@ -167,28 +172,28 @@ Resources:
           Value: !Sub ${AWS::StackId}
         - Key: Name
           Value: !Sub "[${AWS::StackName}] - Biga VPC Public Route Table"
-  PublicRoute:
+  VPCPublicRoute:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PublicRouteTable
+      RouteTableId: !Ref VPCPublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref VPCInternetGateway
-  PublicSubnetRouteTableAssociation:
+  VPCPublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PublicRouteTable
+      RouteTableId: !Ref VPCPublicRouteTable
       SubnetId: !Ref VPCPublicSubnet
-  NatIP:
+  VPCElasticIPNat:
     Type: AWS::EC2::EIP
     DependsOn: VPC
     Properties:
       Domain: VPC
-  NatGateway:
+  VPCNatGateway:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NatIP.AllocationId
+      AllocationId: !GetAtt VPCElasticIPNat.AllocationId
       SubnetId: !Ref VPCPublicSubnet
-  PrivateRouteTable:
+  VPCPrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
@@ -199,22 +204,22 @@ Resources:
           Value: !Sub ${AWS::StackId}
         - Key: Name
           Value: !Sub "[${AWS::StackName}] - Biga VPC Private Route Table"
-  PrivateRoute:
+  VPCPrivateRoute:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref VPCPrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
-  PrivateSubnetRouteTableAssociation1:
+      NatGatewayId: !Ref VPCNatGateway
+  VPCPrivateSubnetRouteTableAssociation1:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref VPCPrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
-  PrivateSubnetRouteTableAssociation2:
+      RouteTableId: !Ref VPCPrivateRouteTable
+  VPCPrivateSubnetRouteTableAssociation2:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref VPCPrivateSubnet2
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref VPCPrivateRouteTable
 
   BigaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -267,7 +272,7 @@ Resources:
     Properties:
       Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
       GenerateSecretString:
-        SecretStringTemplate: '{"username": "ubuntu"}'
+        SecretStringTemplate: !Sub '{"username": "${Ec2InstanceUserName}"}'
         GenerateStringKey: password
         ExcludeCharacters: "`'\"@/\\;,"
         PasswordLength: 32
@@ -344,51 +349,101 @@ Resources:
     Metadata:
       Comment: Install Desktop Environment
       AWS::CloudFormation::Init:
-        # we could have used a single config set, but then commands will be executed alphabetically
-        configSets:
-          default:
-            - base-install
-            - awscli-install
-            - nvidia-install
-            - dcv-install-prerequisites
-            - dcv-install
-            - dcv-configure
-            - carla-install
-            - ros2-install
-            - canigen-install
-            - breeze-install
-            - socketcan-install
-            - firefox-install
-            - finalize-install
-        base-install:
+        config:
+          files:
+            # The cfn-hup.conf file stores the name of the stack and the AWS credentials that the cfn-hup daemon targets.
+            "/etc/cfn/cfn-hup.conf":
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                # The interval used to check for changes to the resource metadata in minutes. Default is 15
+                interval=2
+              mode: "000400"
+              owner: "root"
+              group: "root"
+            # The user actions that the cfn-hup daemon calls periodically are defined in the hooks.conf configuration file.
+            # To support composition of several applications deploying change notification hooks, cfn-hup supports a directory named hooks.d that is located in the hooks configuration directory. You can place one or more additional hooks configuration files in the hooks.d directory. The additional hooks files must use the same layout as the hooks.conf file.
+            "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.WebServerHost.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource WebServerHost --region ${AWS::Region}
+              mode: "000400"
+              owner: "root"
+              group: "root"
+            "/usr/bin/setup-socketcan.sh":
+              content: |
+                #!/bin/bash
+                set -euo pipefail
+
+                if ! CANIF=`ip link | grep vcan0`; then
+                    echo "no vcan adapter found, creating..."
+                    ip link add dev vcan0 type vcan
+                    ip link set up vcan0
+                else
+                    echo "vcan adapter found"
+                fi
+
+                while true; do
+                    echo -n "`date -R` "
+                    if ! CANIF=`ip link | grep ' can0'`; then
+                        echo "no can adapter found"
+                    else
+                        if echo ${CANIF} | grep -q LOWER_UP; then
+                            echo "can adapter is up"
+                        else
+                            echo "can adapter is down, setting up..."
+                            ip link set up can0 txqueuelen 1000 type can bitrate 500000 restart-ms 100
+                        fi
+                    fi
+                    sleep 1
+                done
+              mode: "000400"
+              owner: "root"
+              group: "root"
+            "/lib/systemd/system/setup-socketcan.service":
+              content: |
+                [Unit]
+                Description=Setup SocketCAN Service
+                After=multi-user.target
+                [Service]
+                Type=simple
+                Restart=always
+                RestartSec=1
+                ExecStart=/bin/bash /usr/bin/setup-socketcan.sh
+
+                [Install]
+                WantedBy=multi-user.target
+              mode: "000400"
+              owner: "root"
+              group: "root"
           commands:
-            base-install:
+            01-apt-install:
               ignoreErrors: "false"
               command: |
                 add-apt-repository ppa:deadsnakes/ppa -y
                 apt-get -qq -y update
-                apt-get -qq -y install python3
-                apt-get -qq -y install python3-dev
-                apt-get -qq -y install python3-venv
-                apt-get -qq -y install python3-distutils
-                apt-get -qq -y install python3-pip
-                apt-get -qq -y install python3-setuptools
-                apt-get -qq -y install python-is-python3
-                apt-get -qq -y install locales
-                apt-get -qq -y install software-properties-common
-                apt-get -qq -y install wget
-                apt-get -qq -y install tmux
-                apt-get -qq -y install unzip
-                apt-get -qq -y install tar
-                apt-get -qq -y install curl
-                apt-get -qq -y install sed
-                apt-get -qq -y install jq
-                apt-get -qq -y install whois
-        awscli-install:
-          commands:
-            awscli-install:
+
+                apt-get -qq -y install \
+                    python3 \
+                    python3-venv \
+                    python3-pip \
+                    python-is-python3 \
+                    locales \
+                    software-properties-common \
+                    wget \
+                    tmux \
+                    unzip \
+                    tar \
+                    curl \
+                    sed \
+                    jq \
+                    whois
+            02-awscli-install:
               ignoreErrors: "false"
-              command: |
+              command: !Sub |
                 cd /tmp
                 rm -f /tmp/awscliv2.zip
                 if (uname -a | grep x86 1>/dev/null); then
@@ -400,32 +455,68 @@ Resources:
                 ./aws/install --update -b /usr/bin
 
                 rm -f /tmp/awscliv2.zip
-                echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/ubuntu/.bashrc
-        nvidia-install:
-          commands:
-            nvidia-install:
+            03-add-user:
+              ignoreErrors: "false"
+              command: !Sub |
+                if [ -f /usr/sbin/useradd ]; then
+                    COMMAND_ADD_USR='/usr/sbin/useradd'
+                    COMMAND_CHG_PWD='chpasswd'
+                elif [ -f /usr/sbin/adduser ]; then
+                    COMMAND_ADD_USR='/usr/sbin/adduser'
+                    COMMAND_CHG_PWD='chpasswd'
+                else
+                    exit 1
+                fi              
+                if [ $(getent group "${Ec2InstanceUserName}") ]; then
+                  CREATE_USER_OPTS="-g ${Ec2InstanceUserName}"
+                else
+                  CREATE_USER_OPTS=''
+                fi
+
+                case "$OS_RELEASE" in
+                    amzn.2*)
+                        OS_ADMIN_GROUP='wheel'
+                        ;;
+                    *)
+                        # Catch all without the full path for untested platforms
+                        OS_ADMIN_GROUP='sudo'
+                esac
+
+                $COMMAND_ADD_USR $CREATE_USER_OPTS --comment "Local account for ${Ec2InstanceUserName}" "${Ec2InstanceUserName}" 
+
+                mkdir -p /home/${Ec2InstanceUserName}
+                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /home/${Ec2InstanceUserName}
+
+                OS_PASSWORD=$(aws --region "${AWS::Region}" secretsmanager get-secret-value --secret-id "${Ec2InstanceCarlaSecret}" --query 'SecretString' | jq -r '. | fromjson | .password')
+
+                echo "${Ec2InstanceUserName}:$OS_PASSWORD" | $COMMAND_CHG_PWD
+
+                usermod -a -G $OS_ADMIN_GROUP "${Ec2InstanceUserName}" -s /bin/bash
+            04-create-venv:
+              ignoreErrors: "false"
+              command: !Sub |
+                sudo -H -u ${Ec2InstanceUserName} bash -c "python -m venv ~/venv"
+                sudo -H -u ${Ec2InstanceUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
+            05-nvidia-install:
               ignoreErrors: "false"
               command: |
                 # NVIDIA Drivers installation
                 apt-get -qq -y install ubuntu-drivers-common
                 apt-get -qq -y install $(nvidia-detector)
-
                 nvidia-xconfig --preserve-busid --enable-all-gpus
-        dcv-install-prerequisites:
-          commands:
-            dcv-install-prerequisites:
+            06-dcv-install-prerequisites:
               ignoreErrors: "false"
               command: |
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-prereq.html
                 systemctl isolate graphical.target
                 systemctl set-default graphical.target
 
-                apt-get -qq -y install ubuntu-desktop
-                apt-get -qq -y install gdm3
-                apt-get -qq -y install pulseaudio-utils
-                apt-get -qq -y install libssl1.1
-                apt-get -qq -y install mesa-utils
-                apt-get -qq -y install xserver-xorg-video-dummy
+                apt-get -qq -y install ubuntu-desktop \
+                  gdm3 \
+                  pulseaudio-utils \
+                  libssl1.1 \
+                  mesa-utils \
+                  xserver-xorg-video-dummy
 
                 # resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
                 apt-get -qq -y install dpkg-dev
@@ -439,16 +530,14 @@ Resources:
                 # rm -rf /etc/X11/XF86Config*
 
                 systemctl isolate multi-user.target && systemctl isolate graphical.target
-        dcv-install:
-          commands:
-            dcv-install:
+            07-dcv-install:
               ignoreErrors: "false"
               command: |
                 cd /tmp
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
                 wget -q https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
-                gpg --import NICE-GPG-KEY  
+                gpg --import NICE-GPG-KEY
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
 
@@ -471,14 +560,9 @@ Resources:
                 apt-get -qq -y install ./nice-dcv-web-viewer_*.deb
                 usermod -aG video dcv
                 apt-get -qq -y install ./nice-xdcv_*.deb
-
-                # dcvstartx &
-                # pkill dcvstartx
-        dcv-configure:
-          commands:
-            dcv-configure:
+            08-dcv-configure:
               ignoreErrors: "false"
-              command: |
+              command: !Sub |
                 pip3 install crudini
 
                 systemctl stop dcvserver
@@ -500,20 +584,20 @@ Resources:
                 # crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
 
                 # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-                mkdir -p /home/ubuntu/DCV-Storage
-                chown -R ubuntu:ubuntu /home/ubuntu/DCV-Storage
+                mkdir -p /home/${Ec2InstanceUserName}/DCV-Storage
+                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /home/ubuntu/DCV-Storage
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
                 tee /opt/dcv-virtual-session.sh > /dev/null << EOF
                 #!/bin/bash
-                dcvUser=ubuntu
+                dcvUser=${Ec2InstanceUserName}
                 while true;
                 do
                   if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
                   then
                     sleep 5
                   else
-                    /usr/bin/dcv create-session demo --owner \$dcvUser --storage-root /home/\$dcvUser/DCV-Storage --type=virtual 
+                    /usr/bin/dcv create-session demo --owner \$dcvUser --storage-root /home/\$dcvUser/DCV-Storage --type=virtual
                     /usr/bin/dcv list-sessions
                   fi
                 done
@@ -521,7 +605,7 @@ Resources:
 
                 tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
                 [Unit]
-                Description=Create DCV virtual session for user ubuntu
+                Description=Create DCV virtual session for user ${Ec2InstanceUserName}
                 After=default.target network.target
                 [Service]
                 ExecStart=/opt/dcv-virtual-session.sh
@@ -544,144 +628,125 @@ Resources:
 
                 systemctl status dcvserver
                 systemctl status dcv-virtual-session
-        carla-install:
-          commands:
-            carla-install:
+            09-carla-install:
               ignoreErrors: "false"
-              command: !Sub
-                - |
-                  apt-get -qq -y install libomp5
-                  apt-get -qq -y install can-utils
-                  apt-get -qq -y install socat
-                  apt-get -qq -y install linux-modules-extra-$(uname -r)
+              command: !Sub |
+                apt-get -qq -y install \
+                  libomp5 \
+                  can-utils \
+                  socat \
+                  linux-modules-extra-$(uname -r)
 
-                  export CARLA_VERSION=${CARLA_VERSION}
+                mkdir -p /opt/carla-simulator/
+                cd /opt/carla-simulator/
+                wget -q https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CarlaVersion}.tar.gz
+                tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
+                rm /opt/carla-simulator/CARLA_*.tar.gz
 
-                  mkdir -p /opt/carla-simulator/
-                  cd /opt/carla-simulator/
-                  wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CARLA_VERSION}.tar.gz
-                  tar -xzvf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
-
-                  python -m pip install --upgrade pip
-                  python -m pip install --ignore-installed carla==${CARLA_VERSION}
-                  python -m pip install --ignore-installed -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
-
-                  # chmod -R a+rwx /opt/carla-simulator
-
-                  chown -R "ubuntu:ubuntu" /opt/carla-simulator
-                - CARLA_VERSION: !Ref CarlaVersion
-        ros2-install:
-          commands:
-            ros2-install:
+                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                source ~/venv/bin/activate
+                python -m pip install --upgrade pip
+                python -m pip install carla==${CarlaVersion}
+                python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+                EOF
+            10-ros2-install:
               ignoreErrors: "false"
-              command: !Sub
-                - |
-                  locale-gen en_US en_US.UTF-8
-                  update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-                  export LANG=en_US.UTF-8
+              command: !Sub |
+                locale-gen en_US en_US.UTF-8
+                update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+                export LANG=en_US.UTF-8
 
-                  add-apt-repository universe
-                  curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-                  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+                add-apt-repository universe
+                curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
-                  apt-get -qq -y update
+                apt-get -qq -y update
 
-                  apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
+                apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
+                apt-get -qq -y -f install ros-galactic-ackermann-msgs
 
-                  rm -rf /home/ubuntu/venv
-                  python -m venv /home/ubuntu/venv
-                  source /home/ubuntu/venv/bin/activate
-                  python -m pip install --ignore-installed pyyaml
-                  python -m pip install --ignore-installed setuptools==58.2.0
+                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                source ~/venv/bin/activate
 
-                  export CARLA_ROOT=/opt/carla-simulator/
-                  export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-${CARLA_VERSION}-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
-                  export PYTHONWARNINGS=ignore:::setuptools.command.install,ignore:::setuptools.command.easy_install,ignore:::pkg_resources
+                ROS_DISTRO=galactic
+                pip install  \
+                  colcon-core \
+                  colcon-common-extensions \
+                  colcon-clean \
+                  empy==3.3.4 \
+                  catkin_pkg \
+                  lark \
+                  transforms3d 
+                  
+                export CARLA_ROOT=/opt/carla-simulator/
+                export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-${CarlaVersion}-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
+                export PYTHONWARNINGS=ignore:::setuptools.command.install,ignore:::setuptools.command.easy_install,ignore:::pkg_resources
+                source /opt/ros/galactic/setup.bash
 
-                  source /opt/ros/galactic/setup.bash
+                mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
+                git clone --recurse-submodules  https://github.com/astuff/astuff_sensor_msgs.git
 
-                  mkdir -p /home/ubuntu/ros2_ws/src 
-                  cd /home/ubuntu/ros2_ws
+                cd ~/ros2_ws
+                colcon build --symlink-install
 
-                  git clone https://github.com/astuff/astuff_sensor_msgs.git /home/ubuntu/ros2_ws/src 
+                source ~/ros2_ws/install/setup.bash
+                rosdep update --include-eol-distros -q
+                rosdep install --from-paths src --ignore-src -r -y -q
 
-                  rosdep update
-                  rosdep install --from-paths src --ignore-src -r
-                  colcon build --symlink-install
+                git clone --recurse-submodules  https://github.com/carla-simulator/ros-bridge.git ~/ros2_ws/src/ros-bridge
 
-                  git clone --recurse-submodules https://github.com/carla-simulator/ros-bridge.git /home/ubuntu/ros2_ws/src/ros-bridge
+                rosdep update --include-eol-distros -q
 
-                  rosdep update
-                  rosdep install --from-paths src --ignore-src -r
-                  colcon build --symlink-install
+                cd ~/ros2_ws
+                rosdep install --from-paths src --ignore-src -r -y -q
+                colcon build --symlink-install
 
+                source ~/ros2_ws/install/setup.bash
+                rosdep install --from-paths src --ignore-src -r -y -q
 
-                  source /home/ubuntu/ros2_ws/install/setup.bash
-                  rosdep update
-                  rosdep install --from-paths src --ignore-src -r -y
+                rosdep update --include-eol-distros -q
 
-                  chown -R "ubuntu:ubuntu" /home/ubuntu/ros2_ws
-                  chown -R "ubuntu:ubuntu" /home/ubuntu/venv
-                - CARLA_VERSION: !Ref CarlaVersion
-        socketcan-install:
-          commands:
-            ros2-install:
-              ignoreErrors: "false"
-              command: !Sub
-                - |
-                  # cloning the repository
-                  mkdir -p /home/ubuntu/
-                  cd /home/ubuntu/Desktop
-                  git clone ${REPO_URL}
-
-                  cd /home/ubuntu/Desktop/demo-iot-automotive-simulator/socket-can-setup
-                  sudo cp setup-socketcan.sh /usr/bin
-                  sudo cp setup-socketcan.service /lib/systemd/system
-
-                  systemctl start setup-socketcan
-                  systemctl enable setup-socketcan
-
-                  chown -R "ubuntu:ubuntu" /home/ubuntu/Desktop
-
-                - REPO_URL: !Ref RepositoryURL
-        breeze-install:
-          commands:
-            carla-install:
+                EOF
+            11-socketcan-install:
               ignoreErrors: "false"
               command: |
-                apt-get -qq -y install python3-pyqt5  
-                apt-get -qq -y install pyqt5-dev-tools
-                apt-get -qq -y install qttools5-dev-tools
-        canigen-install:
-          commands:
-            carla-install:
+                systemctl start setup-socketcan
+                systemctl enable setup-socketcan
+            12-breeze-install:
               ignoreErrors: "false"
-              command: |
-                python -m pip install --ignore-installed cantools
-                python -m pip install --ignore-installed prompt_toolkit
-                python -m pip install --ignore-installed python-can
-                python -m pip install --ignore-installed can-isotp
-        firefox-install:
-          commands:
-            firefox-install:
+              command: !Sub |
+                apt-get -qq -y install \
+                    python3-pyqt5 \
+                    pyqt5-dev-tools\
+                    qttools5-dev-tools              
+                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                source ~/venv/bin/activate
+                pip install pyqt5
+                EOF
+            13-canigen-install:
+              ignoreErrors: "false"
+              command: !Sub |
+                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                source ~/venv/bin/activate
+                pip install \
+                    cantools \
+                    prompt_toolkit\
+                    python-can\
+                    can-isotp
+                EOF
+            14-firefox-install:
               ignoreErrors: "false"
               command: |
                 # install firefox browser
                 apt-get -qq -y install firefox
-        finalize-install:
-          commands:
-            finalize-install:
+            15-finalize-install:
               ignoreErrors: "false"
-              command: !Sub |
+              command: |
                 # remove unsued package
                 apt-get -qq -y autoremove
 
                 # check all process are running
                 ps -edf | grep dcv
-
-                # change the ubuntu user password using the secret
-                PASSWORD=$(aws --region "${AWS::Region}" secretsmanager get-secret-value --secret-id "${Ec2InstanceCarlaSecret}" --query 'SecretString' | jq -r '. | fromjson | .password')
-                echo "ubuntu:$PASSWORD" | sudo chpasswd
     Properties:
       ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
@@ -703,28 +768,24 @@ Resources:
           export DEBIAN_FRONTEND=noninteractive
           add-apt-repository ppa:deadsnakes/ppa -y
           apt-get -qq -y update
-          apt-get -qq -y install python3 
-          apt-get -qq -y install python3-dev 
-          apt-get -qq -y install python3-venv 
-          apt-get -qq -y install python3-distutils 
-          apt-get -qq -y install python3-pip 
-          apt-get -qq -y install python3-setuptools
-          apt-get -qq -y install python-is-python3
+          apt-get -qq -y install \
+            python3 \
+            python-is-python3 \
+            python3-pip 
 
-          cd /tmp
-          # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/releasehistory-aws-cfn-bootstrap.html
-          wget -q https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-31.tar.gz
-          tar -xzf ./aws-cfn-bootstrap-py*
-          cd aws-cfn-bootstrap-2.0
-          python3 setup.py build
-          python3 setup.py install
+          python -m pip install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
 
-          # cfn-init
+          # Start cfn-init
           cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
+          STATUS=$?          
+
+          # Start up the cfn-hup daemon to listen for changes to the EC2 instance metadata
+          /opt/aws/bin/cfn-hup
 
           # cfn-init completed so signal success or not
-          cfn-signal -e $? --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
+          cfn-signal -e $STATUS --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
 
+          # roboot for all the changes to take effect
           reboot
       Tags:
         - Key: Name
@@ -824,7 +885,6 @@ Outputs:
     Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager/session-manager/${Ec2InstanceCarla}
   NICEDCVWebAccessConsoleURL:
     Description: NICE DCV Web Access Console
-    # Value: !Sub https://${AWS::Region}.console.aws.amazon.com/systems-manager:8443
     Value: !Join
       - ""
       - - "https://"

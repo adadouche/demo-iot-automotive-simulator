@@ -344,11 +344,11 @@ class DualControl(object):
 
             self._parser = ConfigParser()
             self._parser.read('wheel_config.ini')
-            self._steer_idx = int(self._parser.get('G29 Racing Wheel', 'steering_wheel'))
-            self._throttle_idx = int(self._parser.get('G29 Racing Wheel', 'throttle'))
-            self._brake_idx = int(self._parser.get('G29 Racing Wheel', 'brake'))
-            self._reverse_idx = int(self._parser.get('G29 Racing Wheel', 'reverse'))
-            self._handbrake_idx = int(self._parser.get('G29 Racing Wheel', 'handbrake'))
+            self._steer_idx = int(self._parser.get('Racing Wheel', 'steering_wheel'))
+            self._throttle_idx = int(self._parser.get('Racing Wheel', 'throttle'))
+            self._brake_idx = int(self._parser.get('Racing Wheel', 'brake'))
+            self._reverse_idx = int(self._parser.get('Racing Wheel', 'reverse'))
+            self._handbrake_idx = int(self._parser.get('Racing Wheel', 'handbrake'))
 
     def parse_events(self, world, clock):
         for event in pygame.event.get():

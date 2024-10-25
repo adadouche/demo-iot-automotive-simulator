@@ -193,20 +193,20 @@ The Amazon DCV client will allow more feature compare to the Amazon DCV web brow
 
 [Bask to the top](#table-of-contents)
 
-## Run the CARLA Simulator with manual control
+## Run the CARLA Simulator with manual control and no CAN integration
 
 Now, you can start driving !!! 
 
 In order to do so, you will have to follow the steps below:
 
 - Open an Amazon DCV session (either through the web client or the locl client)
-- Open a new terminal and execute the following command:
+- Open a new terminal as the biga user and execute the following command:
 
     ```sh
     /opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia
     ```
 
-- Open a new terminal and execute the following commands:
+- Open a new terminal as the biga user and execute the following commands:
 
     ```sh
     cd /opt/carla-simulator/PythonAPI/examples
@@ -259,6 +259,27 @@ Here is the keyboard mapping for the car:
     H/?          : toggle help
     ESC          : quit
 ```
+
+## Run the CARLA Simulator with manual control and with CAN integration
+
+In a new terminal as your target user, execute the following commands:
+
+```sh
+cd ~/demo-iot-automotive-simulator
+./start.sh -i vcan0
+```
+
+## Run the CARLA Simulator with steering wheel and with CAN integration
+
+In a new terminal as your target user, execute the following commands:
+
+```sh
+cd ~/demo-iot-automotive-simulator
+./start.sh -i vcan0 --use_steering_wheel
+```
+
+> The tested steering configuration if for a **Logitech G29**.
+> You will need to adapt the confirguration located in the [wheel_config.ini][./carla_client/wheel_config.ini] file for other models and possibly the code in [manual_control_steeringwheel.py](./carla_client/manual_control_steeringwheel.py).
 
 ## Troubleshooting 
 
