@@ -205,12 +205,14 @@ In order to do so, you will have to follow the steps below:
 - Open a new terminal as the biga user and execute the following command:
 
     ```sh
+    source ~/venv/bin/activate
     /opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia
     ```
 
 - Open a new terminal as the biga user and execute the following commands:
 
     ```sh
+    source ~/venv/bin/activate
     cd /opt/carla-simulator/PythonAPI/examples
     python manual_control.py
     ```
@@ -267,6 +269,7 @@ Here is the keyboard mapping for the car:
 In a new terminal as your target user, execute the following commands:
 
 ```sh
+source ~/venv/bin/activate
 cd ~/demo-iot-automotive-simulator
 ./start.sh -i vcan0
 ```
@@ -278,6 +281,7 @@ cd ~/demo-iot-automotive-simulator
 In a new terminal as your target user, execute the following commands:
 
 ```sh
+source ~/venv/bin/activate
 cd ~/demo-iot-automotive-simulator
 ./start.sh -i vcan0 --use_steering_wheel
 ```

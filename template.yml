@@ -524,11 +524,6 @@ Resources:
                 pip3 install crudini
                 crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
 
-                # systemctl stop gdm3
-                # systemctl start gdm3
-
-                # rm -rf /etc/X11/XF86Config*
-
                 systemctl isolate multi-user.target && systemctl isolate graphical.target
             07-dcv-install:
               ignoreErrors: "false"
@@ -643,6 +638,8 @@ Resources:
                 tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
                 rm /opt/carla-simulator/CARLA_*.tar.gz
 
+                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /opt/carla-simulator
+
                 sudo -H -u ${Ec2InstanceUserName} bash <<EOF
                 source ~/venv/bin/activate
                 python -m pip install --upgrade pip
@@ -730,10 +727,11 @@ Resources:
                 source ~/venv/bin/activate
                 pip install \
                     cantools \
-                    prompt_toolkit\
-                    python-can\
+                    prompt_toolkit \
+                    python-can \
                     can-isotp \
-                    opencv-python
+                    opencv-python \
+                    evdev
                 EOF
             14-firefox-install:
               ignoreErrors: "false"

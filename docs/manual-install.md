@@ -60,6 +60,7 @@ apt-get -qq -y install \
     python-is-python3 \
     locales \
     software-properties-common \
+    git \
     wget \
     tmux \
     unzip \
@@ -88,7 +89,6 @@ unzip -q -o awscliv2.zip
 ./aws/install --update -b /usr/bin
 
 rm -f /tmp/awscliv2.zip
-echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/${OS_USER}/.bashrc
 ```
 
 For more details about the AWS CLI installation, please check : https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
@@ -101,7 +101,7 @@ In the same terminal as a **root** user, execute the following commands:
 
 ```sh
 sudo -H -u ${OS_USER} bash -c "python -m venv ~/venv"
-sudo -H -u ${OS_USER} bash -c "git clone ${RepositoryURL ~/demo-iot-automotive-simulator"
+sudo -H -u ${OS_USER} bash -c "git clone ${REPO_URL} ~/demo-iot-automotive-simulator"
 ```
 
 [Bask to the top](#table-of-contents)
@@ -270,6 +270,8 @@ wget -q https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CARL
 tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
 rm /opt/carla-simulator/CARLA_*.tar.gz
 
+chown -R ${OS_USER}:${OS_USER} /opt/carla-simulator
+
 sudo -H -u ${OS_USER} bash <<EOF
 source ~/venv/bin/activate
 python -m pip install --upgrade pip
@@ -378,7 +380,7 @@ done
 
 EOF
 
-cat > /lib/systemd/systemsetup-socketcan.service  <<EOF
+cat > /lib/systemd/system/setup-socketcan.service  <<EOF
 [Unit]
 Description=Setup SocketCAN Service
 After=multi-user.target
@@ -425,9 +427,11 @@ sudo -H -u ${OS_USER} bash <<EOF
 source ~/venv/bin/activate
 pip install \
     cantools \
-    prompt_toolkit\
-    python-can\
-    can-isotp
+    prompt_toolkit \
+    python-can \
+    can-isotp \
+    opencv-python \
+    evdev
 EOF
 ```
 
@@ -496,20 +500,21 @@ Session: 'demo' (owner:biga type:virtual)
 
 ### Run the CARLA Simulator with manual control and no CAN integration
 
-
 In a new terminal as your target user, execute the following commands:
 
 ```sh
+source ~/venv/bin/activate
 /opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia
 ```
 
 In a new terminal as your target user, execute the following commands:
 
 ```sh
+source ~/venv/bin/activate
 cd /opt/carla-simulator/PythonAPI/examples
 python manual_control.py
 ```
 
-![CARLA PythonAPI](images/carla-manual-conrtrol.png "CARLA PythonAPI")
+![CARLA PythonAPI](../images/carla-manual-conrtrol.png "CARLA PythonAPI")
 
 You can use the arrow to control the car.
