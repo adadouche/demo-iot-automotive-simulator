@@ -430,10 +430,10 @@ In the same terminal as a **root** user, execute the following commands:
 sudo -H -u ${OS_USER} bash <<EOF
 source ~/.venv-carla/bin/activate
 pip install \
-    cantools \
-    prompt_toolkit \
-    python-can \
-    can-isotp
+    cantools==37.2.0 \
+    prompt-toolkit==3.0.31 \
+    python-can==4.0.0 \
+    can-isotp==1.8
 EOF
 ```
 
