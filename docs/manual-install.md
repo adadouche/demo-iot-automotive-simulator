@@ -280,7 +280,8 @@ python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.tx
 
 pip install \
     opencv-python \
-    evdev
+    evdev \
+    webcolors
 EOF
 ```
 

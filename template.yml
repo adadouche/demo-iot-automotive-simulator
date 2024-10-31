@@ -498,7 +498,7 @@ Resources:
             04-create-venv:
               ignoreErrors: "false"
               command: !Sub |
-                sudo -H -u ${Ec2InstanceUserName} bash -c "python -m venv ~/.venv-carla"
+                sudo -H -u ${OS_USER} bash -c "python -m venv ~/.venv-carla"
                 sudo -H -u ${Ec2InstanceUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
             05-nvidia-install:
               ignoreErrors: "false"
@@ -651,7 +651,8 @@ Resources:
 
                 python -m pip install \
                     opencv-python \
-                    evdev
+                    evdev \
+                    webcolors
                 EOF
             10-ros2-install:
               ignoreErrors: "false"
@@ -736,10 +737,10 @@ Resources:
                 sudo -H -u ${Ec2InstanceUserName} bash <<EOF
                 source ~/.venv-carla/bin/activate
                 pip install \
-                    cantools \
-                    prompt_toolkit \
-                    python-can \
-                    can-isotp
+                  cantools==37.2.0 \
+                  prompt-toolkit==3.0.31 \
+                  python-can==4.0.0 \
+                  can-isotp==1.8
                 EOF
             14-firefox-install:
               ignoreErrors: "false"
