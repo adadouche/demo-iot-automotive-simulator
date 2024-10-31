@@ -12,7 +12,7 @@ Once you completed the steps below, you will need to reboot for all the changes 
 1. [Prepare the target user environment](#prepare-the-target-user-environment)
 1. [NVIDIA drivers](#nvidia-drivers)
 1. [Amazon DCV](#amazon-dcv)
-1. [CARLA Simulator](#cala-simulator)
+1. [CARLA Simulator](#carla-simulator)
 1. [ROS2](#ros2)
 1. [Socket CAN](#socket-can)
 1. [Breeze](#breeze)
@@ -100,7 +100,7 @@ For more details about the AWS CLI installation, please check : https://docs.aws
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-sudo -H -u ${OS_USER} bash -c "python -m venv ~/venv"
+sudo -H -u ${OS_USER} bash -c "python -m venv ~/.venv-carla"
 sudo -H -u ${OS_USER} bash -c "git clone ${REPO_URL} ~/demo-iot-automotive-simulator"
 ```
 
@@ -273,7 +273,7 @@ rm /opt/carla-simulator/CARLA_*.tar.gz
 chown -R ${OS_USER}:${OS_USER} /opt/carla-simulator
 
 sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+source ~/.venv-carla/bin/activate
 python -m pip install --upgrade pip
 python -m pip install carla==${CARLA_VERSION}
 python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
@@ -306,7 +306,7 @@ apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-co
 apt-get -qq -y -f install ros-galactic-ackermann-msgs
 
 sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+source ~/.venv-carla/bin/activate
 
 ROS_DISTRO=galactic
 pip install  \
@@ -416,7 +416,7 @@ apt-get -qq -y install \
     qttools5-dev-tools
 
 sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+source ~/.venv-carla/bin/activate
 pip install pyqt5
 EOF
 ```
@@ -429,7 +429,7 @@ In the same terminal as a **root** user, execute the following commands:
 
 ```sh
 sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+source ~/.venv-carla/bin/activate
 pip install \
     cantools \
     prompt_toolkit \
@@ -506,14 +506,14 @@ Session: 'demo' (owner:biga type:virtual)
 In a new terminal as your target user, execute the following commands:
 
 ```sh
-source ~/venv/bin/activate
+source ~/.venv-carla/bin/activate
 /opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia
 ```
 
 In a new terminal as your target user, execute the following commands:
 
 ```sh
-source ~/venv/bin/activate
+source ~/.venv-carla/bin/activate
 cd /opt/carla-simulator/PythonAPI/examples
 python manual_control.py
 ```
