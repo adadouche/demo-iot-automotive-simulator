@@ -19,7 +19,7 @@ Once you completed the steps below, you will need to reboot for all the changes 
 1. [CAN Interactive Generator (CANIGEN)](#can-interactive-generator---canigen)
 1. [Firefox](#firefox)
 1. [Cleanup & Reboot](#cleanup--reboot)
-1. [Verify the setup](#verify-the-setup)
+1. [Verify the setup](#verify-the-amazon-dcv-setup)
 
 
 ## Preparation
@@ -461,13 +461,9 @@ reboot
 
 [Bask to the top](#table-of-contents)
 
-## Verify the setup
+## Verify the Amazon DCV setup
 
-You can now verify that the setup has been completed sucessfully.
-
-### Amazon DCV
-
-You can verify that all processes are running using the following command:
+You can verify that all Amazon DCV processes are running using the following command:
 
 ```sh
 ps -edf | grep dcv
@@ -501,7 +497,9 @@ The outpout should look like the following:
 Session: 'demo' (owner:biga type:virtual)
 ```
 
-### Run the CARLA Simulator with manual control and no CAN integration
+## Run the CARLA Simulator with manual control
+
+> The Amazon DCV solution doesn't allow USB remotization for the **Logitech G29** and **Logitech G923** device  
 
 In a new terminal as your target user, execute the following commands:
 
@@ -521,3 +519,32 @@ python manual_control.py
 ![CARLA PythonAPI](../images/carla-manual-conrtrol.png "CARLA PythonAPI")
 
 You can use the arrow to control the car.
+
+## Run the CARLA Simulator with a steering wheel
+
+The **Logitech G29** and **Logitech G923** steering were tested and are curruntly working.
+
+There is no additional isntallation required for the **Logitech G29**.
+
+For the **Logitech G923**, you will need to install the **lg4ff** drivers.
+
+In a terminal as the root user, execute the following commands:
+
+```sh
+apt install libcanberra-gtk-module libcanberra-gtk3-module jstest-gtk 
+mkdir -p /usr/src/new-lg4ff
+git clone https://github.com/berarma/new-lg4ff.git /usr/src/new-lg4ff
+dkms install /usr/src/new-lg4ff
+update-initramfs -u
+```
+
+Now, you need to reboot for the change to take effect.
+
+Open a terminal as your target user and execute the following command:
+
+```sh
+jstest-gtk 
+```
+
+Steer the wheel and press the braks, and you should see the gauge moving for your **Logitech G923** device.
+
