@@ -277,6 +277,11 @@ source ~/venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install carla==${CARLA_VERSION}
 python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+
+pip install \
+    opencv-python \
+    evdev
+EOF
 EOF
 ```
 
@@ -351,7 +356,7 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-cat > /usr/bin/setup-socketcan.sh <<EOF
+cat > /usr/bin/setup-socketcan.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -429,9 +434,7 @@ pip install \
     cantools \
     prompt_toolkit \
     python-can \
-    can-isotp \
-    opencv-python \
-    evdev
+    can-isotp
 EOF
 ```
 

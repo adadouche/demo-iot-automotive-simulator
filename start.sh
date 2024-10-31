@@ -23,7 +23,7 @@ start_process() {
 killit() {
     search_string=$1
     echo "killing ${search_string}..."
-    kill $(ps aux | grep '${search_string}' | awk '{print $2}') > /dev/null 2>&1
+    kill $(ps aux | grep "${search_string}" | awk '{print $2}') > /dev/null 2>&1
 }
 
 # Function to kill all process groups

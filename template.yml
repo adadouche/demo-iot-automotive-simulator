@@ -423,6 +423,9 @@ Resources:
             01-apt-install:
               ignoreErrors: "false"
               command: |
+                export DEBIAN_FRONTEND=noninteractive
+                while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+                while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done              
                 add-apt-repository ppa:deadsnakes/ppa -y
                 apt-get -qq -y update
 
@@ -495,7 +498,7 @@ Resources:
             04-create-venv:
               ignoreErrors: "false"
               command: !Sub |
-                sudo -H -u ${Ec2InstanceUserName} bash -c "python -m venv ~/venv"
+                sudo -H -u ${Ec2InstanceUserName} bash -c "python -m venv ~/.venv-carla"
                 sudo -H -u ${Ec2InstanceUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
             05-nvidia-install:
               ignoreErrors: "false"
@@ -641,10 +644,14 @@ Resources:
                 chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /opt/carla-simulator
 
                 sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                source ~/.venv-carla/bin/activate
                 python -m pip install --upgrade pip
                 python -m pip install carla==${CarlaVersion}
                 python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+
+                python -m pip install \
+                    opencv-python \
+                    evdev
                 EOF
             10-ros2-install:
               ignoreErrors: "false"
@@ -657,13 +664,16 @@ Resources:
                 curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
                 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
+                export DEBIAN_FRONTEND=noninteractive
+                while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+                while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
                 apt-get -qq -y update
 
                 apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
                 apt-get -qq -y -f install ros-galactic-ackermann-msgs
 
                 sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                source ~/.venv-carla/bin/activate
 
                 ROS_DISTRO=galactic
                 pip install  \
@@ -717,21 +727,19 @@ Resources:
                     pyqt5-dev-tools\
                     qttools5-dev-tools              
                 sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                source ~/.venv-carla/bin/activate
                 pip install pyqt5
                 EOF
             13-canigen-install:
               ignoreErrors: "false"
               command: !Sub |
                 sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                source ~/.venv-carla/bin/activate
                 pip install \
                     cantools \
                     prompt_toolkit \
                     python-can \
-                    can-isotp \
-                    opencv-python \
-                    evdev
+                    can-isotp
                 EOF
             14-firefox-install:
               ignoreErrors: "false"
@@ -763,8 +771,9 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash
-          # https://stackoverflow.com/questions/33370297/apt-get-update-non-interactive
           export DEBIAN_FRONTEND=noninteractive
+          while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+          while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
           add-apt-repository ppa:deadsnakes/ppa -y
           apt-get -qq -y update
           apt-get -qq -y install \
@@ -784,7 +793,7 @@ Resources:
           # cfn-init completed so signal success or not
           cfn-signal -e $STATUS --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
 
-          # roboot for all the changes to take effect
+          # reboot for all the changes to take effect
           reboot
       Tags:
         - Key: Name
