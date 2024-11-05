@@ -16,7 +16,7 @@ Metadata:
           - InstanceType
           - Ec2InstanceVolumeSize
           - Ec2InstanceVolumeType
-          - Ec2InstanceUserName
+          - OSUserName
       - Label:
           default: Biga Instance configuration
         Parameters:
@@ -66,7 +66,7 @@ Parameters:
     Type: Number
     Description: Volume Size in GiBs (must be equal or larger than snapshot size)
     Default: 40
-  Ec2InstanceUserName:
+  OSUserName:
     Description: the OS username to be created on the Carla Simulator.
     Type: String
     Default: biga
@@ -268,9 +268,9 @@ Resources:
     Properties:
       Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
       GenerateSecretString:
-        SecretStringTemplate: !Sub '{"username": "${Ec2InstanceUserName}"}'
+        SecretStringTemplate: !Sub '{"username": "${OSUserName}"}'
         GenerateStringKey: password
-        ExcludeCharacters: "`'\"@/\\;,"
+        ExcludeCharacters: "`'\"@/\\;,$%<>^"
         PasswordLength: 32
 
   Ec2InstanceCarlaIamRole:
@@ -419,6 +419,9 @@ Resources:
             01-apt-install:
               ignoreErrors: "false"
               command: |
+                export DEBIAN_FRONTEND=noninteractive
+                while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+                while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done              
                 add-apt-repository ppa:deadsnakes/ppa -y
                 apt-get -qq -y update
 
@@ -462,9 +465,14 @@ Resources:
                     COMMAND_CHG_PWD='chpasswd'
                 else
                     exit 1
-                fi              
-                if [ $(getent group "${Ec2InstanceUserName}") ]; then
-                  CREATE_USER_OPTS="-g ${Ec2InstanceUserName}"
+                fi
+
+                SECRET=$(aws --region '${AWS::Region}' secretsmanager get-secret-value --secret-id '${Ec2InstanceCarlaSecret}' --query 'SecretString')
+                OS_PASSWORD=$(echo $SECRET | jq -r '. | fromjson | .password')
+                OS_USER=$(echo $SECRET | jq -r '. | fromjson | .username')
+                
+                if [ $(getent group "$OS_USER") ]; then
+                  CREATE_USER_OPTS="-g $OS_USER"
                 else
                   CREATE_USER_OPTS=''
                 fi
@@ -478,21 +486,19 @@ Resources:
                         OS_ADMIN_GROUP='sudo'
                 esac
 
-                $COMMAND_ADD_USR $CREATE_USER_OPTS --comment "Local account for ${Ec2InstanceUserName}" "${Ec2InstanceUserName}" 
+                $COMMAND_ADD_USR $CREATE_USER_OPTS --comment "Local account for $OS_USER" "$OS_USER"
 
-                mkdir -p /home/${Ec2InstanceUserName}
-                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /home/${Ec2InstanceUserName}
+                mkdir -p /home/$OS_USER
+                chown -R $OS_USER:$OS_USER /home/$OS_USER
+                
+                echo "$OS_USER:$OS_PASSWORD" | $COMMAND_CHG_PWD
 
-                OS_PASSWORD=$(aws --region "${AWS::Region}" secretsmanager get-secret-value --secret-id "${Ec2InstanceCarlaSecret}" --query 'SecretString' | jq -r '. | fromjson | .password')
-
-                echo "${Ec2InstanceUserName}:$OS_PASSWORD" | $COMMAND_CHG_PWD
-
-                usermod -a -G $OS_ADMIN_GROUP "${Ec2InstanceUserName}" -s /bin/bash
+                usermod -a -G $OS_ADMIN_GROUP "$OS_USER" -s /bin/bash
             04-create-venv:
               ignoreErrors: "false"
               command: !Sub |
-                sudo -H -u ${Ec2InstanceUserName} bash -c "python -m venv ~/venv"
-                sudo -H -u ${Ec2InstanceUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
+                sudo -H -u ${OSUserName} bash -c "python -m venv ~/.venv-carla"
+                sudo -H -u ${OSUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
             05-nvidia-install:
               ignoreErrors: "false"
               command: |
@@ -519,11 +525,6 @@ Resources:
 
                 pip3 install crudini
                 crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
-
-                # systemctl stop gdm3
-                # systemctl start gdm3
-
-                # rm -rf /etc/X11/XF86Config*
 
                 systemctl isolate multi-user.target && systemctl isolate graphical.target
             07-dcv-install:
@@ -580,13 +581,13 @@ Resources:
                 # crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
 
                 # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-                mkdir -p /home/${Ec2InstanceUserName}/DCV-Storage
-                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /home/ubuntu/DCV-Storage
+                mkdir -p /home/${OSUserName}/DCV-Storage
+                chown -R ${OSUserName}:${OSUserName} /home/ubuntu/DCV-Storage
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
                 tee /opt/dcv-virtual-session.sh > /dev/null << EOF
                 #!/bin/bash
-                dcvUser=${Ec2InstanceUserName}
+                dcvUser=${OSUserName}
                 while true;
                 do
                   if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
@@ -601,7 +602,7 @@ Resources:
 
                 tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
                 [Unit]
-                Description=Create DCV virtual session for user ${Ec2InstanceUserName}
+                Description=Create DCV virtual session for user ${OSUserName}
                 After=default.target network.target
                 [Service]
                 ExecStart=/opt/dcv-virtual-session.sh
@@ -639,11 +640,19 @@ Resources:
                 tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
                 rm /opt/carla-simulator/CARLA_*.tar.gz
 
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                chown -R ${OSUserName}:${OSUserName} /opt/carla-simulator
+
+                sudo -H -u ${OSUserName} bash <<EOF
+                source ~/.venv-carla/bin/activate
                 python -m pip install --upgrade pip
                 python -m pip install carla==${CarlaVersion}
                 python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+
+                python -m pip install \
+                    opencv-python \
+                    evdev \
+                    boto3 \
+                    webcolors
                 EOF
             10-ros2-install:
               ignoreErrors: "false"
@@ -656,13 +665,16 @@ Resources:
                 curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
                 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
+                export DEBIAN_FRONTEND=noninteractive
+                while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+                while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
                 apt-get -qq -y update
 
                 apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
                 apt-get -qq -y -f install ros-galactic-ackermann-msgs
 
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                sudo -H -u ${OSUserName} bash <<EOF
+                source ~/.venv-carla/bin/activate
 
                 ROS_DISTRO=galactic
                 pip install  \
@@ -715,21 +727,20 @@ Resources:
                     python3-pyqt5 \
                     pyqt5-dev-tools\
                     qttools5-dev-tools              
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                sudo -H -u ${OSUserName} bash <<EOF
+                source ~/.venv-carla/bin/activate
                 pip install pyqt5
                 EOF
             13-canigen-install:
               ignoreErrors: "false"
               command: !Sub |
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
-                source ~/venv/bin/activate
+                sudo -H -u ${OSUserName} bash <<EOF
+                source ~/.venv-carla/bin/activate
                 pip install \
-                    cantools \
-                    prompt_toolkit\
-                    python-can\
-                    can-isotp \
-                    opencv-python
+                  cantools==37.2.0 \
+                  prompt-toolkit==3.0.31 \
+                  python-can==4.0.0 \
+                  can-isotp==1.8
                 EOF
             14-firefox-install:
               ignoreErrors: "false"
@@ -761,8 +772,9 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash
-          # https://stackoverflow.com/questions/33370297/apt-get-update-non-interactive
           export DEBIAN_FRONTEND=noninteractive
+          while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+          while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
           add-apt-repository ppa:deadsnakes/ppa -y
           apt-get -qq -y update
           apt-get -qq -y install \
@@ -774,15 +786,15 @@ Resources:
 
           # Start cfn-init
           cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
-          STATUS=$?          
-
+          STATUS=$?
+          
           # Start up the cfn-hup daemon to listen for changes to the EC2 instance metadata
           /opt/aws/bin/cfn-hup
 
           # cfn-init completed so signal success or not
           cfn-signal -e $STATUS --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region}
 
-          # roboot for all the changes to take effect
+          # reboot for all the changes to take effect
           reboot
       Tags:
         - Key: Name

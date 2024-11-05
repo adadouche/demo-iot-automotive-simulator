@@ -16,7 +16,7 @@ Metadata:
           - InstanceType
           - Ec2InstanceVolumeSize
           - Ec2InstanceVolumeType
-          - Ec2InstanceUserName
+          - OSUserName
       - Label:
           default: Biga Instance configuration
         Parameters:
@@ -66,7 +66,7 @@ Parameters:
     Type: Number
     Description: Volume Size in GiBs (must be equal or larger than snapshot size)
     Default: 40
-  Ec2InstanceUserName:
+  OSUserName:
     Description: the OS username to be created on the Carla Simulator.
     Type: String
     Default: biga
@@ -272,9 +272,9 @@ Resources:
     Properties:
       Description: Simple secret created by AWS CloudFormation for the Ec2InstanceCarla.
       GenerateSecretString:
-        SecretStringTemplate: !Sub '{"username": "${Ec2InstanceUserName}"}'
+        SecretStringTemplate: !Sub '{"username": "${OSUserName}"}'
         GenerateStringKey: password
-        ExcludeCharacters: "`'\"@/\\;,"
+        ExcludeCharacters: "`'\"@/\\;,$%<>^"
         PasswordLength: 32
 
   Ec2InstanceCarlaIamRole:
@@ -469,9 +469,14 @@ Resources:
                     COMMAND_CHG_PWD='chpasswd'
                 else
                     exit 1
-                fi              
-                if [ $(getent group "${Ec2InstanceUserName}") ]; then
-                  CREATE_USER_OPTS="-g ${Ec2InstanceUserName}"
+                fi
+
+                SECRET=$(aws --region '${AWS::Region}' secretsmanager get-secret-value --secret-id '${Ec2InstanceCarlaSecret}' --query 'SecretString')
+                OS_PASSWORD=$(echo $SECRET | jq -r '. | fromjson | .password')
+                OS_USER=$(echo $SECRET | jq -r '. | fromjson | .username')
+                
+                if [ $(getent group "$OS_USER") ]; then
+                  CREATE_USER_OPTS="-g $OS_USER"
                 else
                   CREATE_USER_OPTS=''
                 fi
@@ -485,21 +490,19 @@ Resources:
                         OS_ADMIN_GROUP='sudo'
                 esac
 
-                $COMMAND_ADD_USR $CREATE_USER_OPTS --comment "Local account for ${Ec2InstanceUserName}" "${Ec2InstanceUserName}" 
+                $COMMAND_ADD_USR $CREATE_USER_OPTS --comment "Local account for $OS_USER" "$OS_USER"
 
-                mkdir -p /home/${Ec2InstanceUserName}
-                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /home/${Ec2InstanceUserName}
+                mkdir -p /home/$OS_USER
+                chown -R $OS_USER:$OS_USER /home/$OS_USER
+                
+                echo "$OS_USER:$OS_PASSWORD" | $COMMAND_CHG_PWD
 
-                OS_PASSWORD=$(aws --region "${AWS::Region}" secretsmanager get-secret-value --secret-id "${Ec2InstanceCarlaSecret}" --query 'SecretString' | jq -r '. | fromjson | .password')
-
-                echo "${Ec2InstanceUserName}:$OS_PASSWORD" | $COMMAND_CHG_PWD
-
-                usermod -a -G $OS_ADMIN_GROUP "${Ec2InstanceUserName}" -s /bin/bash
+                usermod -a -G $OS_ADMIN_GROUP "$OS_USER" -s /bin/bash
             04-create-venv:
               ignoreErrors: "false"
               command: !Sub |
-                sudo -H -u ${OS_USER} bash -c "python -m venv ~/.venv-carla"
-                sudo -H -u ${Ec2InstanceUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
+                sudo -H -u ${OSUserName} bash -c "python -m venv ~/.venv-carla"
+                sudo -H -u ${OSUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
             05-nvidia-install:
               ignoreErrors: "false"
               command: |
@@ -582,13 +585,13 @@ Resources:
                 # crudini --set /etc/dcv/dcv.conf "session-management/automatic-console-session" "owner" "ubuntu"
 
                 # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-                mkdir -p /home/${Ec2InstanceUserName}/DCV-Storage
-                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /home/ubuntu/DCV-Storage
+                mkdir -p /home/${OSUserName}/DCV-Storage
+                chown -R ${OSUserName}:${OSUserName} /home/ubuntu/DCV-Storage
 
                 # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
                 tee /opt/dcv-virtual-session.sh > /dev/null << EOF
                 #!/bin/bash
-                dcvUser=${Ec2InstanceUserName}
+                dcvUser=${OSUserName}
                 while true;
                 do
                   if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
@@ -603,7 +606,7 @@ Resources:
 
                 tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
                 [Unit]
-                Description=Create DCV virtual session for user ${Ec2InstanceUserName}
+                Description=Create DCV virtual session for user ${OSUserName}
                 After=default.target network.target
                 [Service]
                 ExecStart=/opt/dcv-virtual-session.sh
@@ -641,9 +644,9 @@ Resources:
                 tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
                 rm /opt/carla-simulator/CARLA_*.tar.gz
 
-                chown -R ${Ec2InstanceUserName}:${Ec2InstanceUserName} /opt/carla-simulator
+                chown -R ${OSUserName}:${OSUserName} /opt/carla-simulator
 
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                sudo -H -u ${OSUserName} bash <<EOF
                 source ~/.venv-carla/bin/activate
                 python -m pip install --upgrade pip
                 python -m pip install carla==${CarlaVersion}
@@ -652,6 +655,7 @@ Resources:
                 python -m pip install \
                     opencv-python \
                     evdev \
+                    boto3 \
                     webcolors
                 EOF
             10-ros2-install:
@@ -673,7 +677,7 @@ Resources:
                 apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
                 apt-get -qq -y -f install ros-galactic-ackermann-msgs
 
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                sudo -H -u ${OSUserName} bash <<EOF
                 source ~/.venv-carla/bin/activate
 
                 ROS_DISTRO=galactic
@@ -727,14 +731,14 @@ Resources:
                     python3-pyqt5 \
                     pyqt5-dev-tools\
                     qttools5-dev-tools              
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                sudo -H -u ${OSUserName} bash <<EOF
                 source ~/.venv-carla/bin/activate
                 pip install pyqt5
                 EOF
             13-canigen-install:
               ignoreErrors: "false"
               command: !Sub |
-                sudo -H -u ${Ec2InstanceUserName} bash <<EOF
+                sudo -H -u ${OSUserName} bash <<EOF
                 source ~/.venv-carla/bin/activate
                 pip install \
                   cantools==37.2.0 \
@@ -786,8 +790,8 @@ Resources:
 
           # Start cfn-init
           cfn-init -v --stack ${AWS::StackName} --resource Ec2InstanceCarla --region ${AWS::Region} -c default
-          STATUS=$?          
-
+          STATUS=$?
+          
           # Start up the cfn-hup daemon to listen for changes to the EC2 instance metadata
           /opt/aws/bin/cfn-hup
 
