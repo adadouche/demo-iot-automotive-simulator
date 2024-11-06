@@ -12,14 +12,14 @@ Once you completed the steps below, you will need to reboot for all the changes 
 1. [Prepare the target user environment](#prepare-the-target-user-environment)
 1. [NVIDIA drivers](#nvidia-drivers)
 1. [Amazon DCV](#amazon-dcv)
-1. [CARLA Simulator](#cala-simulator)
+1. [CARLA Simulator](#carla-simulator)
 1. [ROS2](#ros2)
 1. [Socket CAN](#socket-can)
 1. [Breeze](#breeze)
 1. [CAN Interactive Generator (CANIGEN)](#can-interactive-generator---canigen)
 1. [Firefox](#firefox)
 1. [Cleanup & Reboot](#cleanup--reboot)
-1. [Verify the setup](#verify-the-setup)
+1. [Verify the setup](#verify-the-amazon-dcv-setup)
 
 
 ## Preparation
@@ -30,12 +30,12 @@ Open a terminal as a **root** user and execute the following commands:
 
 > If you close this terminal, and open anew, you will need to execute these commands again.
 
-> You might need to adjust the OS_USER depending on how you system is configured.
+> You might need to adjust the OSUserName depending on how you system is configured.
 
 ```sh
-export CARLA_VERSION=0.9.13
-export REPO_URL=https://github.com/adadouche/demo-iot-automotive-simulator
-export OS_USER=biga
+export CarlaVersion=0.9.13
+export RepositoryURL=https://github.com/adadouche/demo-iot-automotive-simulator
+export OSUserName=biga
 ```
 
 [Bask to the top](#table-of-contents)
@@ -60,6 +60,7 @@ apt-get -qq -y install \
     python-is-python3 \
     locales \
     software-properties-common \
+    git \
     wget \
     tmux \
     unzip \
@@ -88,7 +89,6 @@ unzip -q -o awscliv2.zip
 ./aws/install --update -b /usr/bin
 
 rm -f /tmp/awscliv2.zip
-echo "export AWS_CLI_AUTO_PROMPT=on-partial" >> /home/${OS_USER}/.bashrc
 ```
 
 For more details about the AWS CLI installation, please check : https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
@@ -100,8 +100,8 @@ For more details about the AWS CLI installation, please check : https://docs.aws
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-sudo -H -u ${OS_USER} bash -c "python -m venv ~/venv"
-sudo -H -u ${OS_USER} bash -c "git clone ${RepositoryURL ~/demo-iot-automotive-simulator"
+sudo -H -u ${OSUserName} bash -c "python -m venv ~/.venv-carla"
+sudo -H -u ${OSUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
 ```
 
 [Bask to the top](#table-of-contents)
@@ -205,13 +205,13 @@ crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints" "['0.0.0.0
 crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
 
 # session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-mkdir -p /home/${OS_USER}/DCV-Storage
-chown -R ${OS_USER}:${OS_USER} /home/${OS_USER}/DCV-Storage
+mkdir -p /home/${OSUserName}/DCV-Storage
+chown -R ${OSUserName}:${OSUserName} /home/${OSUserName}/DCV-Storage
 
 # https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
 tee /opt/dcv-virtual-session.sh > /dev/null << EOF
 #!/bin/bash
-dcvUser=${OS_USER}
+dcvUser=${OSUserName}
 while true;
 do
     if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
@@ -266,15 +266,22 @@ apt-get -qq -y install \
 
 mkdir -p /opt/carla-simulator/
 cd /opt/carla-simulator/
-wget -q https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CARLA_VERSION}.tar.gz
+wget -q https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CarlaVersion}.tar.gz
 tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
 rm /opt/carla-simulator/CARLA_*.tar.gz
 
-sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+chown -R ${OSUserName}:${OSUserName} /opt/carla-simulator
+
+sudo -H -u ${OSUserName} bash <<EOF
+source ~/.venv-carla/bin/activate
 python -m pip install --upgrade pip
-python -m pip install carla==${CARLA_VERSION}
+python -m pip install carla==${CarlaVersion}
 python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+
+pip install \
+    opencv-python \
+    evdev \
+    webcolors
 EOF
 ```
 
@@ -298,8 +305,8 @@ apt-get -qq -y update
 apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
 apt-get -qq -y -f install ros-galactic-ackermann-msgs
 
-sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+sudo -H -u ${OSUserName} bash <<EOF
+source ~/.venv-carla/bin/activate
 
 ROS_DISTRO=galactic
 pip install  \
@@ -349,7 +356,7 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-cat > /usr/bin/setup-socketcan.sh <<EOF
+cat > /usr/bin/setup-socketcan.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -378,7 +385,7 @@ done
 
 EOF
 
-cat > /lib/systemd/systemsetup-socketcan.service  <<EOF
+cat > /lib/systemd/system/setup-socketcan.service  <<EOF
 [Unit]
 Description=Setup SocketCAN Service
 After=multi-user.target
@@ -408,8 +415,8 @@ apt-get -qq -y install \
     pyqt5-dev-tools\
     qttools5-dev-tools
 
-sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+sudo -H -u ${OSUserName} bash <<EOF
+source ~/.venv-carla/bin/activate
 pip install pyqt5
 EOF
 ```
@@ -421,13 +428,13 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-sudo -H -u ${OS_USER} bash <<EOF
-source ~/venv/bin/activate
+sudo -H -u ${OSUserName} bash <<EOF
+source ~/.venv-carla/bin/activate
 pip install \
-    cantools \
-    prompt_toolkit\
-    python-can\
-    can-isotp
+    cantools==37.2.0 \
+    prompt-toolkit==3.0.31 \
+    python-can==4.0.0 \
+    can-isotp==1.8
 EOF
 ```
 
@@ -454,13 +461,9 @@ reboot
 
 [Bask to the top](#table-of-contents)
 
-## Verify the setup
+## Verify the Amazon DCV setup
 
-You can now verify that the setup has been completed sucessfully.
-
-### Amazon DCV
-
-You can verify that all processes are running using the following command:
+You can verify that all Amazon DCV processes are running using the following command:
 
 ```sh
 ps -edf | grep dcv
@@ -494,22 +497,54 @@ The outpout should look like the following:
 Session: 'demo' (owner:biga type:virtual)
 ```
 
-### Run the CARLA Simulator with manual control and no CAN integration
+## Run the CARLA Simulator with manual control
 
+> The Amazon DCV solution doesn't allow USB remotization for the **Logitech G29** and **Logitech G923** device  
 
 In a new terminal as your target user, execute the following commands:
 
 ```sh
+source ~/.venv-carla/bin/activate
 /opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Epic -prefernvidia
 ```
 
 In a new terminal as your target user, execute the following commands:
 
 ```sh
+source ~/.venv-carla/bin/activate
 cd /opt/carla-simulator/PythonAPI/examples
 python manual_control.py
 ```
 
-![CARLA PythonAPI](images/carla-manual-conrtrol.png "CARLA PythonAPI")
+![CARLA PythonAPI](../images/carla-manual-conrtrol.png "CARLA PythonAPI")
 
 You can use the arrow to control the car.
+
+## Run the CARLA Simulator with a steering wheel
+
+The **Logitech G29** and **Logitech G923** steering were tested and are curruntly working.
+
+There is no additional isntallation required for the **Logitech G29**.
+
+For the **Logitech G923**, you will need to install the **lg4ff** drivers.
+
+In a terminal as the root user, execute the following commands:
+
+```sh
+apt install libcanberra-gtk-module libcanberra-gtk3-module jstest-gtk 
+mkdir -p /usr/src/new-lg4ff
+git clone https://github.com/berarma/new-lg4ff.git /usr/src/new-lg4ff
+dkms install /usr/src/new-lg4ff
+update-initramfs -u
+```
+
+Now, you need to reboot for the change to take effect.
+
+Open a terminal as your target user and execute the following command:
+
+```sh
+jstest-gtk 
+```
+
+Steer the wheel and press the braks, and you should see the gauge moving for your **Logitech G923** device.
+

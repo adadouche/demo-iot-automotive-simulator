@@ -48,8 +48,8 @@ import boto3
 import json
 s3_client = boto3.client('s3')
 
-VSS_BUCKET_NAME="data-bucket-dfc3a919e0f7cbb"
-VSS_BUCKET_PREFIX="telemetry_vss_data"
+VSS_BUCKET_NAME="bucket-name-xyz"
+VSS_BUCKET_PREFIX="bucket-prefix-xyz"
 
 def closest_color_name(rgb_color):
     min_colors = {}
