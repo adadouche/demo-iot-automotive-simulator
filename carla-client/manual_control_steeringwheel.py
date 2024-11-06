@@ -40,11 +40,30 @@ try:
 except IndexError:
     pass
 
+# ==============================================================================
+# -- vss imports -------------------------------------------------------------------
+# ==============================================================================
+import webcolors
+import boto3
+import json
+s3_client = boto3.client('s3')
+
+VSS_BUCKET_NAME="data-bucket-dfc3a919e0f7cbb"
+VSS_BUCKET_PREFIX="telemetry_vss_data"
+
+def closest_color_name(rgb_color):
+    min_colors = {}
+    for name in webcolors.names("css3"):
+        r_c, g_c, b_c = webcolors.name_to_rgb(name)
+        rd = (r_c - rgb_color[0]) ** 2
+        gd = (g_c - rgb_color[1]) ** 2
+        bd = (b_c - rgb_color[2]) ** 2
+        min_colors[(rd + gd + bd)] = name
+    return min_colors[min(min_colors.keys())]
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
 # ==============================================================================
-
 
 import carla
 
@@ -52,6 +71,7 @@ from carla import ColorConverter as cc
 
 import argparse
 import collections
+from datetime import timezone
 import datetime
 import logging
 import math
@@ -107,7 +127,6 @@ try:
     import numpy as np
 except ImportError:
     raise RuntimeError('cannot import numpy, make sure numpy package is installed')
-
 
 def initialize_steering_wheel():
     from evdev import ecodes, InputDevice, ff, list_devices
@@ -189,12 +208,14 @@ class CarlaRos2Publisher(Node):
 
 class World(object):
     def __init__(self, carla_world, hud, args, carla_ros2_publisher):
+
         self.world = carla_world
         self.sync = args.sync
         self.actor_role_name = args.rolename
         self.hud = hud
         self.carla_ros2_publisher = carla_ros2_publisher
         self.player = None
+        self.player_blueprint = None
         self.collision_sensor = None
         self.lane_invasion_sensor = None
         self.gnss_sensor = None
@@ -203,6 +224,20 @@ class World(object):
         self._weather_presets = find_weather_presets()
         self._weather_index = 0
         self._actor_filter = args.filter
+
+        self.available_bluprints = []
+        blueprints_all = [bp for bp in self.world.get_blueprint_library().filter('*')]
+        for blueprint in blueprints_all:
+            actor_type = blueprint.tags[2]
+            if actor_type == "vehicle":
+                actor_brand = blueprint.tags[0]
+                actor_model = blueprint.tags[1]
+                number_of_wheels = blueprint.get_attribute("number_of_wheels").as_int()
+                              
+                if number_of_wheels >= 4 and actor_brand != "carlamotors" and actor_model != "carlamotors":
+                    logging.info(f"actor_type : {actor_type} / actor_brand : {actor_brand} / actor_model : {actor_model} / {blueprint.tags}")
+                    self.available_bluprints.append(blueprint)
+
         self.restart()
         self.world.on_tick(hud.on_world_tick)
         self.can = canigen.canigen.canigen(
@@ -211,12 +246,36 @@ class World(object):
             obd_config_filename='canigen/obd_config_chevy.json'
         )
 
+
+        self.vss_last_location = self.player.get_location()
+        self.vss_last_tick = int(datetime.datetime.now(timezone.utc) .timestamp())
+
+        self.vss_session_start = self.vss_last_tick
+        self.vss_session_distance = 0.0
+        self.vss_session_duration = 0.0
+        self.vss_session_speed_avg = 0.0
+        self.vss_session_speed_max = 0.0
+
+        self.vss_trip_start = self.vss_last_tick
+        self.vss_trip_distance = 0.0        
+        self.vss_trip_duration = 0.0
+        self.vss_trip_speed_avg = 0.0
+        self.vss_trip_speed_max = 0.0
+
+        if blueprint.has_attribute('color'):
+            carla_color = self.player_blueprint.get_attribute('color').as_color()
+            self.vss_vehicle_exterior_color = closest_color_name([carla_color.r, carla_color.g, carla_color.b])
+        self.vss_vehicle_brand = self.player_blueprint.tags[0]
+        self.vss_vehicle_model = self.player_blueprint.tags[1]
+
     def restart(self):
+
         # Keep same camera config if the camera manager exists.
         cam_index = self.camera_manager.index if self.camera_manager is not None else 0
         cam_pos_index = self.camera_manager.transform_index if self.camera_manager is not None else 0
         # Get a random blueprint.
-        blueprint = random.choice(self.world.get_blueprint_library().filter(self._actor_filter))
+
+        blueprint = random.choice(self.available_bluprints) 
         blueprint.set_attribute('role_name', self.actor_role_name)
         if blueprint.has_attribute('color'):
             color = random.choice(blueprint.get_attribute('color').recommended_values)
@@ -248,6 +307,22 @@ class World(object):
             self.world.tick()
         else:
             self.world.wait_for_tick()
+
+        self.player_blueprint = blueprint
+
+        self.vss_vehicle_brand = self.player_blueprint.tags[0]
+        self.vss_vehicle_model = self.player_blueprint.tags[1]
+
+        if blueprint.has_attribute('color'):
+            carla_color = self.player_blueprint.get_attribute('color').as_color()
+            self.vss_vehicle_exterior_color = closest_color_name([carla_color.r, carla_color.g, carla_color.b])
+
+        self.vss_last_tick = int(datetime.datetime.now(timezone.utc) .timestamp())
+        self.vss_trip_start = self.vss_last_tick
+        self.vss_trip_distance = 0.0
+        self.vss_trip_duration = 0.0
+        self.vss_trip_speed_avg = 0.0
+        self.vss_trip_speed_max = 0.0
 
     def next_weather(self, reverse=False):
         self._weather_index += -1 if reverse else 1
@@ -286,7 +361,88 @@ class World(object):
         self.carla_ros2_publisher.publish_data('steering_position', steering_position, Float32)
         self.carla_ros2_publisher.publish_data('brake_pressure', brake_pressure, Float32)
         self.carla_ros2_publisher.publish_data('gear', control.gear, Int32)
+        
+        if speed_kph > self.vss_trip_speed_max:
+            self.vss_trip_speed_max = speed_kph
+        if speed_kph > self.vss_session_speed_max:
+            self.vss_session_speed_max = speed_kph
 
+        # self.tick_vss(clock)
+
+    def tick_vss(self, clock):
+        # zill send a vss messsage every seconds to the S3 bucket
+        if self.vss_last_tick is None:
+            # print("init vss_last_tick ")
+            self.vss_last_tick = int(datetime.datetime.now(timezone.utc) .timestamp())
+            return
+
+        vss_curr_tick_ct = datetime.datetime.now(timezone.utc) 
+        vss_curr_tick_ts = int(vss_curr_tick_ct.timestamp())
+        if vss_curr_tick_ts - self.vss_last_tick > 0:
+            self.vss_last_tick = vss_curr_tick_ts
+
+            velocity = self.player.get_velocity()
+            speed_kph = 3.6 * math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+
+            new_location = self.player.get_location()
+            old_location = self.vss_last_location
+
+            tick_travelled_distance = math.sqrt(( new_location.x - old_location.x )**2 + ( new_location.y - old_location.y )**2)
+            
+            self.vss_trip_distance = self.vss_trip_distance + tick_travelled_distance
+            self.vss_trip_duration = vss_curr_tick_ts - self.vss_trip_start
+            self.vss_trip_speed_avg = (self.vss_trip_distance / 1000) / ((vss_curr_tick_ts - self.vss_trip_start) / 3600)
+            
+            #print(self.vss_trip_speed_avg , self.vss_trip_distance , tick_travelled_distance, (vss_curr_tick_ts -self.vss_trip_start))
+
+            self.vss_session_distance = self.vss_session_distance + tick_travelled_distance
+            self.vss_session_duration = vss_curr_tick_ts - self.vss_session_start
+            self.vss_session_speed_avg = (self.vss_session_distance / 1000) / ((vss_curr_tick_ts - self.vss_session_start) / 3600)
+
+            vss_data  = {
+                "acceleration": {
+                    "longitudinal": self.imu_sensor.accelerometer[0],
+                    "lateral": self.imu_sensor.accelerometer[1],
+                    "vertical": self.imu_sensor.accelerometer[2]
+                },
+                "angularvelocity": {
+                    "roll": self.imu_sensor.gyroscope[0],
+                    "pitch": self.imu_sensor.gyroscope[1],
+                    "yaw": self.imu_sensor.gyroscope[2]
+                },
+                "currentlocation": {
+                    "altitude": self.gnss_sensor.alt,
+                    "heading": self.imu_sensor.compass,
+                    # "horizontalaccuracy": 0.19,
+                    "latitude": self.gnss_sensor.lat,
+                    "longitude": self.gnss_sensor.lon,
+                    "timestamp": str(vss_curr_tick_ct),
+                    # "verticalaccuracy": 0.34
+                },
+                "vehicleidentification": {
+                    "brand": self.vss_vehicle_brand,
+                    "model": self.vss_vehicle_model,
+                    "vehicleexteriorcolor": self.vss_vehicle_exterior_color
+                },
+                "speed": speed_kph,
+                "starttime": vss_curr_tick_ct, 
+                "ismoving": int(tick_travelled_distance) > 0,
+                "tripduration" :  vss_curr_tick_ts - self.vss_trip_start, # in seconds
+                "traveleddistance": self.vss_trip_duration, # in meters
+                "traveleddistancesincestart": self.vss_session_distance, # in meters
+                "averagespeed": self.vss_trip_speed_avg # in km/h
+            }
+
+            self.vss_last_location = new_location
+
+            # Convert Dictionary to JSON String
+            data_string = json.dumps(vss_data, default=str)
+
+            s3_client.put_object(
+                Bucket=VSS_BUCKET_NAME, 
+                Key=f'{VSS_BUCKET_PREFIX}/{vss_curr_tick_ts}',
+                Body=data_string
+            )
 
     def render(self, display):
         self.camera_manager.render(display)
@@ -329,7 +485,6 @@ class DualControl(object):
             raise NotImplementedError("Actor type not supported")
         self._steer_cache = 0.0
         world.hud.notification("Press 'H' or '?' for help.", seconds=4.0)
-
 
         if self._use_steering_wheel:
             # initialize steering wheel
@@ -545,6 +700,12 @@ class HUD(object):
             'Vehicle: % 20s' % get_actor_display_name(world.player, truncate=20),
             'Map:     % 20s' % world.world.get_map().name.split('/')[-1],
             'Simulation time: % 12s' % datetime.timedelta(seconds=int(self.simulation_time)),
+            '',
+            'Trip',
+            '  Distance : % 10.0f m' % (world.vss_trip_distance),
+            '  Duration : % 10.0f s' % (world.vss_trip_duration),
+            '  Avg Speed : % 3.0f km/h' % (world.vss_trip_speed_avg),
+            '  Max Speed : % 3.0f km/h' % (world.vss_trip_speed_max),
             '',
             'Speed:   % 15.0f km/h' % (3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2)),
             u'Heading:% 16.0f\N{DEGREE SIGN} % 2s' % (t.rotation.yaw, heading),
@@ -773,6 +934,7 @@ class GnssSensor(object):
         self._parent = parent_actor
         self.lat = 0.0
         self.lon = 0.0
+        self.alt = 0.0
         world = self._parent.get_world()
         bp = world.get_blueprint_library().find('sensor.other.gnss')
         self.sensor = world.spawn_actor(bp, carla.Transform(carla.Location(x=1.0, z=2.8)), attach_to=self._parent)
@@ -788,6 +950,7 @@ class GnssSensor(object):
             return
         self.lat = event.latitude
         self.lon = event.longitude
+        self.alt = event.altitude
 
 # ==============================================================================
 # -- IMUSensor --------------------------------------------------------
@@ -1075,5 +1238,4 @@ def main():
 
 
 if __name__ == '__main__':
-
     main()
