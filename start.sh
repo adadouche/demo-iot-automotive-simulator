@@ -28,10 +28,11 @@ killit() {
 
 # Function to kill all process groups
 cleanup() {
+    # ...do something interesting...
     if [ ! "$cleanup_in_progress" = true ] ; then
         cleanup_in_progress=true
         for pid in "${pids[@]}"; do
-            log "killing pid ${pid} ..."
+            # log "killing pid ${pid} ..."
             kill -9 $pid > /dev/null 2>&1 # Kills the entire process group
         done
         pkill CarlaUE4
@@ -57,32 +58,24 @@ main() {
     # cleanup everything first
     cleanup
 
-    # now if we call cleanup, it means we are exiting
     exit_after_cleanup=true
     # Array to store process group IDs
     declare -a pids
-
-    # remove the save configuration from Carla
-    rm -rf ~/.config/Epic/CarlaUE4
 
     if [[ "$additional_carla_client_args" == *"vcan0"* ]]; then
         log "start vcan multicast forwarding"
         pid=$(start_process "./multicast_can_send.sh" "$log_dir/socketcan.log")
         pids+=($pid)
         log "  -> process pid   : $pid"
-        # log "  -> monitored pid : ${pids[*]}"
     fi
 
     # Start processes
     log "starting CarlaUE4"
-    pid=$(start_process "/opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Low -prefernvidia -fps=15" "$log_dir/carla.log")
+    pid=$(start_process "/opt/carla-simulator/CarlaUE4.sh -no-rendering -quality-level=Low -prefernvidia" "$log_dir/carla.log")
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
-    sleep 10
-
-    # pid=$(start_process "python /opt/carla-simulator/PythonAPI/util/config.py -d --no-rendering" "$log_dir/carla-config.log")
-    # pids+=($pid)
+    sleep 15
     
     source /opt/ros/galactic/setup.bash
     source ~/ros2_ws/install/setup.bash
@@ -121,7 +114,7 @@ main() {
     cd carla-client/ros2
 
     log "starting image_converter rgb_front"
-    pid=$(start_process "python3 ./image_converter.py --input_topic /carla/ego_vehicle/rgb_front/image   --output_topic /carla/ego_vehicle/rgb_front/compressed_image" "../../$log_dir/image_conv1.log")
+    pid=$(start_process "python3 ./image_converter.py --input_topic /carla/ego_vehicle/rgb_front/image --output_topic /carla/ego_vehicle/rgb_front/compressed_image" "../../$log_dir/image_conv1.log")
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
@@ -131,7 +124,6 @@ main() {
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
-    
     
     cd ../../
 

@@ -46,6 +46,8 @@ except IndexError:
 import webcolors
 import boto3
 import json
+from threading import Thread
+
 s3_client = boto3.client('s3')
 
 VSS_BUCKET_NAME="bucket-name-xyz"
@@ -269,7 +271,6 @@ class World(object):
         self.vss_vehicle_model = self.player_blueprint.tags[1]
 
     def restart(self):
-
         # Keep same camera config if the camera manager exists.
         cam_index = self.camera_manager.index if self.camera_manager is not None else 0
         cam_pos_index = self.camera_manager.transform_index if self.camera_manager is not None else 0
@@ -361,24 +362,24 @@ class World(object):
         self.carla_ros2_publisher.publish_data('steering_position', steering_position, Float32)
         self.carla_ros2_publisher.publish_data('brake_pressure', brake_pressure, Float32)
         self.carla_ros2_publisher.publish_data('gear', control.gear, Int32)
-        
+
         if speed_kph > self.vss_trip_speed_max:
             self.vss_trip_speed_max = speed_kph
         if speed_kph > self.vss_session_speed_max:
             self.vss_session_speed_max = speed_kph
 
-        # self.tick_vss(clock)
+        # Creates a thread
+        t = Thread(target=self.tick_vss)
 
-    def tick_vss(self, clock):
-        # zill send a vss messsage every seconds to the S3 bucket
-        if self.vss_last_tick is None:
-            # print("init vss_last_tick ")
-            self.vss_last_tick = int(datetime.datetime.now(timezone.utc) .timestamp())
-            return
+        # Launches the thread (while not blocking the main execution)
+        t.start()
+
+    def tick_vss(self):
+        # will send a vss messsage every seconds to the S3 bucket
 
         vss_curr_tick_ct = datetime.datetime.now(timezone.utc) 
         vss_curr_tick_ts = int(vss_curr_tick_ct.timestamp())
-        if vss_curr_tick_ts - self.vss_last_tick > 0:
+        if vss_curr_tick_ts - int(self.vss_last_tick) > 0:
             self.vss_last_tick = vss_curr_tick_ts
 
             velocity = self.player.get_velocity()
@@ -387,17 +388,20 @@ class World(object):
             new_location = self.player.get_location()
             old_location = self.vss_last_location
 
+            vss_curr_tick_ct = datetime.datetime.now(timezone.utc) 
+            vss_curr_tick_ts = int(vss_curr_tick_ct.timestamp())
+
             tick_travelled_distance = math.sqrt(( new_location.x - old_location.x )**2 + ( new_location.y - old_location.y )**2)
             
             self.vss_trip_distance = self.vss_trip_distance + tick_travelled_distance
             self.vss_trip_duration = vss_curr_tick_ts - self.vss_trip_start
-            self.vss_trip_speed_avg = (self.vss_trip_distance / 1000) / ((vss_curr_tick_ts - self.vss_trip_start) / 3600)
+            self.vss_trip_speed_avg = (self.vss_trip_distance / 1000) / ((vss_curr_tick_ts - self.vss_trip_start) / 3600) if vss_curr_tick_ts - self.vss_trip_start > 0 else 0.0
             
-            #print(self.vss_trip_speed_avg , self.vss_trip_distance , tick_travelled_distance, (vss_curr_tick_ts -self.vss_trip_start))
-
             self.vss_session_distance = self.vss_session_distance + tick_travelled_distance
             self.vss_session_duration = vss_curr_tick_ts - self.vss_session_start
-            self.vss_session_speed_avg = (self.vss_session_distance / 1000) / ((vss_curr_tick_ts - self.vss_session_start) / 3600)
+            self.vss_session_speed_avg = (self.vss_session_distance / 1000) / ((vss_curr_tick_ts - self.vss_session_start) / 3600) if vss_curr_tick_ts - self.vss_session_start > 0 else 0.0
+
+            self.vss_last_location = self.player.get_location()
 
             vss_data  = {
                 "acceleration": {
@@ -422,18 +426,16 @@ class World(object):
                 "vehicleidentification": {
                     "brand": self.vss_vehicle_brand,
                     "model": self.vss_vehicle_model,
-                    "vehicleexteriorcolor": self.vss_vehicle_exterior_color
+                    "vehicleexteriorcolor": (self.vss_vehicle_exterior_color if self.player_blueprint.has_attribute('color') else None)
                 },
                 "speed": speed_kph,
-                "starttime": vss_curr_tick_ct, 
-                "ismoving": int(tick_travelled_distance) > 0,
-                "tripduration" :  vss_curr_tick_ts - self.vss_trip_start, # in seconds
-                "traveleddistance": self.vss_trip_duration, # in meters
+                "starttime": self.vss_trip_start, 
+                "ismoving":speed_kph > 1,
+                "tripduration" :  self.vss_trip_duration, # in seconds
+                "traveleddistance": self.vss_trip_distance, # in meters
                 "traveleddistancesincestart": self.vss_session_distance, # in meters
                 "averagespeed": self.vss_trip_speed_avg # in km/h
             }
-
-            self.vss_last_location = new_location
 
             # Convert Dictionary to JSON String
             data_string = json.dumps(vss_data, default=str)
@@ -1162,7 +1164,6 @@ def game_loop(args):
 # ==============================================================================
 # -- main() --------------------------------------------------------------------
 # ==============================================================================
-
 
 def main():
     argparser = argparse.ArgumentParser(
