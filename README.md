@@ -58,6 +58,15 @@ You will need to set the ***Connection Setting*** to be ***WebSockets/TCP*** ins
 
 In order to properly deploy the stack and access the environment, you will need to complete the following stpes on your local machine.
 
+##### Setting environment variables
+
+```bash
+export AWS_PROFILE="riv24"
+export AWS_DEFAULT_REGION=$(aws configure get region --profile ${AWS_PROFILE})
+export AWS_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text --profile ${AWS_PROFILE})
+export AWS_DEFAULT_REGION=eu-central-1
+```
+
 #### Session Manager plugin
 
 For security reasons, you need to use the AWS systems manager with the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/install-plugin-debian-and-ubuntu.html) to tunnel the DCV port to your local machine.
@@ -82,22 +91,28 @@ Alternatively, you can execute the following script to retrieve the latest Biga 
 
 > Make sure to replace the `<STACK_NAME>` token if you changed the deployed stack name from [demo-iot-automotive-embeddedlinux-image](https://github.com/aws4embeddedlinux/demo-iot-automotive-embeddedlinux-image).
 
-```
-cat << 'EOF' > get-ami-id.sh
-#!/bin/bash
+```bash
+# cat << 'EOF' > get-ami-id.sh
+# #!/bin/bash
 
-STACK_NAME=EC2AMIBigaPipeline
+# STACK_NAME=EC2AMIBigaPipeline
 
-s3_bucket_arn=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --output text --query "Stacks[0].Outputs[?OutputKey=='BuildOutput'].OutputValue")
-s3_bucket_name=${s3_bucket_arn##*:}
-ami_file=$(aws s3api list-objects --bucket $s3_bucket_name --output text --query 'Contents[?starts_with(Key, `ami`) == `true`][Key,LastModified] | sort_by(@, &[1])[1:][0]')
-ami_id=${ami_file%%.*}
+# s3_bucket_arn=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --output text --query "Stacks[0].Outputs[?OutputKey=='BuildOutput'].OutputValue")
+# s3_bucket_name=${s3_bucket_arn##*:}
+# ami_file=$(aws s3api list-objects --bucket $s3_bucket_name --output text --query 'Contents[?starts_with(Key, `ami`) == `true`][Key,LastModified] | sort_by(@, &[1])[1:][0]')
+# ami_id=${ami_file%%.*}
 
-echo -e "${ami_id}"
-EOF
-chmod +x get-ami-id.sh
+# echo -e "${ami_id}"
+# EOF
+# chmod +x get-ami-id.sh
 
-echo -e "The Biga AMI ID is : $(./get-ami-id.sh)"
+ami_id=${aws ec2 describe-images \
+    --region $AWS_DEFAULT_REGION \
+    --owners self \
+    --query 'Images[?contains(ImageLocation, `poky-agl-pike`) == `true`] | sort_by(@, &CreationDate) | [-1] | ImageId' \
+    --output text}
+
+echo -e "The Biga AMI ID is : $ami_id"
 ```
 
 -----

@@ -269,7 +269,6 @@ class World(object):
         self.vss_vehicle_model = self.player_blueprint.tags[1]
 
     def restart(self):
-
         # Keep same camera config if the camera manager exists.
         cam_index = self.camera_manager.index if self.camera_manager is not None else 0
         cam_pos_index = self.camera_manager.transform_index if self.camera_manager is not None else 0
@@ -361,13 +360,13 @@ class World(object):
         self.carla_ros2_publisher.publish_data('steering_position', steering_position, Float32)
         self.carla_ros2_publisher.publish_data('brake_pressure', brake_pressure, Float32)
         self.carla_ros2_publisher.publish_data('gear', control.gear, Int32)
-        
+
         if speed_kph > self.vss_trip_speed_max:
             self.vss_trip_speed_max = speed_kph
         if speed_kph > self.vss_session_speed_max:
             self.vss_session_speed_max = speed_kph
 
-        # self.tick_vss(clock)
+        self.tick_vss(clock)
 
     def tick_vss(self, clock):
         # zill send a vss messsage every seconds to the S3 bucket
@@ -1162,7 +1161,6 @@ def game_loop(args):
 # ==============================================================================
 # -- main() --------------------------------------------------------------------
 # ==============================================================================
-
 
 def main():
     argparser = argparse.ArgumentParser(
