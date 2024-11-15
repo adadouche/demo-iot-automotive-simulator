@@ -106,11 +106,11 @@ Alternatively, you can execute the following script to retrieve the latest Biga 
 # EOF
 # chmod +x get-ami-id.sh
 
-ami_id=${aws ec2 describe-images \
+ami_id=$(aws ec2 describe-images \
     --region $AWS_DEFAULT_REGION \
     --owners self \
     --query 'Images[?contains(ImageLocation, `poky-agl-pike`) == `true`] | sort_by(@, &CreationDate) | [-1] | ImageId' \
-    --output text}
+    --output text)
 
 echo -e "The Biga AMI ID is : $ami_id"
 ```
