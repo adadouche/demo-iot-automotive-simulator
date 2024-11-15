@@ -28,7 +28,6 @@ killit() {
 
 # Function to kill all process groups
 cleanup() {
-    # ...do something interesting...
     if [ ! "$cleanup_in_progress" = true ] ; then
         cleanup_in_progress=true
         for pid in "${pids[@]}"; do

@@ -56,15 +56,25 @@ You will need to set the ***Connection Setting*** to be ***WebSockets/TCP*** ins
 
 ### Prerequisites
 
-In order to properly deploy the stack and access the environment, you will need to complete the following stpes on your local machine.
+This is the list of pre requisites for completing the installation and deployment:
+
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+- [AWS CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html)
+- [Node.js and NPM](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
+- OS Packages 
+  - Zip & Unzip
+  - jq
 
 ##### Setting environment variables
 
 ```bash
-export AWS_PROFILE="riv24"
-export AWS_DEFAULT_REGION=$(aws configure get region --profile ${AWS_PROFILE})
+export AWS_PROFILE="default"
 export AWS_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text --profile ${AWS_PROFILE})
-export AWS_DEFAULT_REGION=eu-central-1
+export AWS_DEFAULT_REGION=$(aws configure get region --profile ${AWS_PROFILE})
+
+echo "PROFILE : $AWS_PROFILE"
+echo "ACCOUNT : $AWS_DEFAULT_ACCOUNT"
+echo "REGION  : $AWS_DEFAULT_REGION"
 ```
 
 #### Session Manager plugin
@@ -92,25 +102,11 @@ Alternatively, you can execute the following script to retrieve the latest Biga 
 > Make sure to replace the `<STACK_NAME>` token if you changed the deployed stack name from [demo-iot-automotive-embeddedlinux-image](https://github.com/aws4embeddedlinux/demo-iot-automotive-embeddedlinux-image).
 
 ```bash
-# cat << 'EOF' > get-ami-id.sh
-# #!/bin/bash
-
-# STACK_NAME=EC2AMIBigaPipeline
-
-# s3_bucket_arn=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --output text --query "Stacks[0].Outputs[?OutputKey=='BuildOutput'].OutputValue")
-# s3_bucket_name=${s3_bucket_arn##*:}
-# ami_file=$(aws s3api list-objects --bucket $s3_bucket_name --output text --query 'Contents[?starts_with(Key, `ami`) == `true`][Key,LastModified] | sort_by(@, &[1])[1:][0]')
-# ami_id=${ami_file%%.*}
-
-# echo -e "${ami_id}"
-# EOF
-# chmod +x get-ami-id.sh
-
-ami_id=${aws ec2 describe-images \
+ami_id=$(aws ec2 describe-images \
     --region $AWS_DEFAULT_REGION \
     --owners self \
     --query 'Images[?contains(ImageLocation, `poky-agl-pike`) == `true`] | sort_by(@, &CreationDate) | [-1] | ImageId' \
-    --output text}
+    --output text)
 
 echo -e "The Biga AMI ID is : $ami_id"
 ```
@@ -133,7 +129,7 @@ Once the template is selected clicnk on **Next**.
 
 ![CloudFormation template](images/cloudformation-template.png "template")
 
-Specify a **Stack name** like **`demo-iot-automotive-simulator`** and the following parameter values (all fields are required):
+Specify a **Stack name** like **`biga-simulator`** and the following parameter values (all fields are required):
 
 | Parameter Name       | Description | Default value |
 |----------------------|-------------|---------------|
@@ -168,7 +164,7 @@ On the **Outputs** tab, locate the entry named **`CarlaSimulatorSecret`**.
 You can now execute the following command to retrieve the Ubuntu user password stored in the secret:
 
 ```sh
-STACK_NAME=demo-iot-automotive-simulator
+STACK_NAME=biga-simulator
 
 secret_arn=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --output text --query "Stacks[0].Outputs[?OutputKey=='CarlaSimulatorSecret'].OutputValue")
 
@@ -206,7 +202,6 @@ Once installed, start the Amazon DCV client :
 From the **Outputs** tab in the CloudFormation stack, locate the entry named **`NICEDCVClientConnectionString`** and paste it in the Amazon DCV client.
 
 The Amazon DCV client will allow more feature compare to the Amazon DCV web browser client.
-
 
 [Bask to the top](#table-of-contents)
 
