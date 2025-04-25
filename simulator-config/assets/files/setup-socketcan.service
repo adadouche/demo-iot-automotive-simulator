@@ -1,0 +1,11 @@
+[Unit]
+Description=Setup SocketCAN Service
+After=multi-user.target
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+ExecStart=/bin/bash /usr/bin/setup-socketcan.sh
+
+[Install]
+WantedBy=multi-user.target

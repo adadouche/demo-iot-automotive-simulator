@@ -7,3 +7,22 @@ samconfig.toml
 logs
 get-ami-id.sh
 *.log
+
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+# yarn asset
+yarn-install.log
+.yarn
+!.yarn/releases/
+!.yarn/plugins/
+!.yarn/versions/
+!.yarn/sdks/
+.pnp.*
+cdk/cdk.context.json
