@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source ~/.venv-carla/bin/activate
+
 # Parsing command-line arguments
 additional_carla_client_args="$@"
 
