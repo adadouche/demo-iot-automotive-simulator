@@ -28,92 +28,119 @@ First you will need to set some environement variables and clone the Git reposit
 
 Open a terminal as a **root** user and execute the following commands:
 
-> If you close this terminal, and open anew, you will need to execute these commands again.
 
+```sh
+export CARLA_VERSION=0.9.13
+export CARLA_OS_USER_NAME=biga
+export SIMULATOR_CONFIG_DESTINATION=/opt/demo-iot-automotive-simulator/simulator-config
+export STACK_REGION=eu-central-1
+```
+
+> [!NOTE]
+>
+> If you close this terminal, and open a new one, you will need to execute these commands again.
+> 
 > You might need to adjust the OSUserName depending on how you system is configured.
+>
 
-```sh
-export CarlaVersion=0.9.13
-export RepositoryURL=https://github.com/adadouche/demo-iot-automotive-simulator
-export OSUserName=biga
+[Bask to the top](#table-of-contents)
+
+## Clone the project
+
+```bash
+
+cd /opt
+git clone https://github.com/adadouche/demo-iot-automotive-simulator.git
+cd $SIMULATOR_CONFIG_DESTINATION
 ```
 
 [Bask to the top](#table-of-contents)
 
-## APT Install Ubuntu packages
+## Install services files
 
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-add-apt-repository ppa:deadsnakes/ppa -y
-apt-get -qq -y update
-
-apt-get -qq -y upgrade
-
-apt-get -qq -y install \
-    python3 \
-    python3-dev \
-    python3-venv \
-    python3-distutils \
-    python3-pip \
-    python3-setuptools \
-    python-is-python3 \
-    locales \
-    software-properties-common \
-    git \
-    wget \
-    tmux \
-    unzip \
-    tar \
-    curl \
-    sed \
-    jq \
-    whois
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 00-deploy-services.sh
 ```
 
 [Bask to the top](#table-of-contents)
 
-## AWS CLI
+## Install Ubuntu packages
 
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-cd /tmp
-rm -f /tmp/awscliv2.zip
-if (uname -a | grep x86 1>/dev/null); then
-    curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
-else
-    curl https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip
-fi
-unzip -q -o awscliv2.zip
-./aws/install --update -b /usr/bin
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 01-apt-install.sh 
+```
 
-rm -f /tmp/awscliv2.zip
+[Bask to the top](#table-of-contents)
+
+## Install AWS components
+
+In the same terminal as a **root** user, execute the following commands:
+
+```sh
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 02-aws-install.sh
 ```
 
 For more details about the AWS CLI installation, please check : https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
 [Bask to the top](#table-of-contents)
 
+## Create the OS user password using Secrets Manager 
+
+In the same terminal as a **root** user, execute the following commands:
+
+```sh
+export CARLA_SECRET='my-secret-20'
+PASSWORD=$(aws secretsmanager get-random-password \
+    --password-length 32 \
+    --exclude-characters "\`\'\"@/;,\$%<>^//" \
+    --output text
+)
+
+cat <<EOF > $CARLA_SECRET.json
+{"username": "${CARLA_OS_USER_NAME}", "password": "${PASSWORD}"}
+EOF
+
+aws secretsmanager create-secret \
+    --name $CARLA_SECRET \
+    --description "Simple secret created by AWS CDK for the Carla instance." \
+    --secret-string file://$CARLA_SECRET.json
+rm $CARLA_SECRET.json
+```
+
 ## Prepare the target user environment 
 
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-sudo -H -u ${OSUserName} bash -c "python -m venv ~/.venv-carla"
-sudo -H -u ${OSUserName} bash -c "git clone ${RepositoryURL} ~/demo-iot-automotive-simulator"
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 03-add-user.sh
 ```
 
 [Bask to the top](#table-of-contents)
+
+## Create a Python Virtual environment
+
+In the same terminal as a **root** user, execute the following commands:
+
+```sh
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 04-create-venv.sh
+```
 
 ## NVIDIA drivers
 
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-apt-get -qq -y install ubuntu-drivers-common
-apt-get -qq -y install $(nvidia-detector)
-nvidia-xconfig --preserve-busid --enable-all-gpus
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 05-nvidia-install.sh
 ```
 
 For more details about the NVIDIA drivers installation, please check : https://ubuntu.com/server/docs/nvidia-drivers-installation
@@ -129,24 +156,8 @@ For more details about the Amazon DCV installation, please check : https://docs.
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-systemctl isolate graphical.target
-systemctl set-default graphical.target
-
-apt-get -qq -y install \
-    ubuntu-desktop \
-    gdm3 \
-    pulseaudio-utils \
-    libssl1.1 \
-    mesa-utils \
-    xserver-xorg-video-dummy
-
-# resolve "/var/lib/dpkg/info/nice-dcv-server.postinst: 8: dpkg-architecture: not found" when installing dcv-server
-apt-get -qq -y install dpkg-dev
-
-python -m pip install crudini
-crudini --set /etc/gdm3/custom.conf "daemon" "WaylandEnable" "false"
-
-systemctl isolate multi-user.target && systemctl isolate graphical.target
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 06-dcv-install-prerequisites.sh
 ```
 
 ### Installation
@@ -154,33 +165,8 @@ systemctl isolate multi-user.target && systemctl isolate graphical.target
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-cd /tmp
-
-# https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
-wget -q https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
-gpg --import NICE-GPG-KEY  
-
-# https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html#linux-server-install
-
-rm -f /tmp/nice-dcv-*.tgz
-if ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 22.04 1>/dev/null)); then
-    wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2204-x86_64.tgz
-    tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-elif ((uname -a | grep x86 1>/dev/null) && (cat /etc/os-release | grep 18.04 1>/dev/null)); then
-    wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-x86_64.tgz
-    tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-elif (cat /etc/os-release | grep 18.04 1>/dev/null); then
-    wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu1804-aarch64.tgz
-    tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-aarch64
-else
-    wget -q https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2004-x86_64.tgz
-    tar -xzf nice-dcv-ubuntu*.tgz && cd nice-dcv-*-x86_64
-fi
-
-apt-get -qq -y install ./nice-dcv-server_*.deb
-apt-get -qq -y install ./nice-dcv-web-viewer_*.deb
-usermod -aG video dcv
-apt-get -qq -y install ./nice-xdcv_*.deb
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 07-dcv-install.sh
 ```
 
 ### Configuration
@@ -188,67 +174,8 @@ apt-get -qq -y install ./nice-xdcv_*.deb
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-python -m pip install crudini
-
-systemctl stop dcvserver
-
-cp /etc/dcv/dcv.conf /etc/dcv/dcv.conf.original
-
-# https://docs.aws.amazon.com/dcv/latest/adminguide/enable-quic.html
-crudini --set /etc/dcv/dcv.conf "security" "no-tls-strict" "true"
-
-crudini --set /etc/dcv/dcv.conf "connectivity" "enable-quic-frontend" "false"
-
-crudini --set /etc/dcv/dcv.conf "connectivity" "quic-listen-endpoints" "['0.0.0.0:8443', '[::]:8443']"
-crudini --set /etc/dcv/dcv.conf "connectivity" "quic-port" "8443"
-crudini --set /etc/dcv/dcv.conf "connectivity" "web-listen-endpoints" "['0.0.0.0:8443', '[::]:8443']"
-crudini --set /etc/dcv/dcv.conf "connectivity" "web-port" "8443"
-
-# session storage: https://docs.aws.amazon.com/dcv/latest/userguide/using-transfer.html
-mkdir -p /home/${OSUserName}/DCV-Storage
-chown -R ${OSUserName}:${OSUserName} /home/${OSUserName}/DCV-Storage
-
-# https://docs.aws.amazon.com/dcv/latest/adminguide/managing-sessions-start.html#managing-sessions-start-manual
-tee /opt/dcv-virtual-session.sh > /dev/null << EOF
-#!/bin/bash
-dcvUser=${OSUserName}
-while true;
-do
-    if (/usr/bin/dcv list-sessions | grep \$dcvUser 1>/dev/null)
-    then
-    sleep 5
-    else
-    /usr/bin/dcv create-session demo --owner \$dcvUser --storage-root /home/\$dcvUser/DCV-Storage --type=virtual 
-    /usr/bin/dcv list-sessions
-    fi
-done
-EOF
-
-tee /etc/systemd/system/dcv-virtual-session.service > /dev/null << EOF
-[Unit]
-Description=Create DCV virtual session for user ubuntu
-After=default.target network.target
-[Service]
-ExecStart=/opt/dcv-virtual-session.sh
-[Install]
-WantedBy=default.target
-EOF
-
-chmod +x /opt/dcv-virtual-session.sh
-
-# text console: DCV virtual sessions only
-systemctl daemon-reload
-systemctl enable --now dcvserver
-systemctl enable --now dcv-virtual-session
-
-systemctl stop dcvserver
-systemctl stop dcv-virtual-session
-
-systemctl restart dcvserver
-systemctl restart dcv-virtual-session
-
-systemctl status dcvserver
-systemctl status dcv-virtual-session
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 08-dcv-configure.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -258,31 +185,8 @@ systemctl status dcv-virtual-session
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-apt-get -qq -y install \
-    libomp5 \
-    can-utils \
-    socat \
-    linux-modules-extra-$(uname -r)
-
-mkdir -p /opt/carla-simulator/
-cd /opt/carla-simulator/
-wget -q https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CarlaVersion}.tar.gz
-tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
-rm /opt/carla-simulator/CARLA_*.tar.gz
-
-chown -R ${OSUserName}:${OSUserName} /opt/carla-simulator
-
-sudo -H -u ${OSUserName} bash <<EOF
-source ~/.venv-carla/bin/activate
-python -m pip install --upgrade pip
-python -m pip install carla==${CarlaVersion}
-python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
-
-pip install \
-    opencv-python \
-    evdev \
-    webcolors
-EOF
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 09-carla-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -292,61 +196,8 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-locale-gen en_US en_US.UTF-8
-update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-export LANG=en_US.UTF-8
-
-add-apt-repository universe
-curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-apt-get -qq -y update
-
-apt-get -qq -y -f install ros-galactic-desktop python3-rosdep2 python3-colcon-common-extensions
-apt-get -qq -y -f install ros-galactic-ackermann-msgs
-
-sudo -H -u ${OSUserName} bash <<EOF
-source ~/.venv-carla/bin/activate
-
-ROS_DISTRO=galactic
-pip install  \
-    colcon-core \
-    colcon-common-extensions \
-    colcon-clean \
-    empy==3.3.4 \
-    catkin_pkg \
-    lark \
-    transforms3d 
-    
-export CARLA_ROOT=/opt/carla-simulator/
-export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-${CarlaVersion}-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla
-export PYTHONWARNINGS=ignore:::setuptools.command.install,ignore:::setuptools.command.easy_install,ignore:::pkg_resources
-source /opt/ros/galactic/setup.bash
-
-mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone --recurse-submodules  https://github.com/astuff/astuff_sensor_msgs.git
-
-cd ~/ros2_ws
-colcon build --symlink-install
-
-source ~/ros2_ws/install/setup.bash
-rosdep update --include-eol-distros -q
-rosdep install --from-paths src --ignore-src -r -y -q
-
-git clone --recurse-submodules  https://github.com/carla-simulator/ros-bridge.git ~/ros2_ws/src/ros-bridge
-
-rosdep update --include-eol-distros -q
-
-cd ~/ros2_ws
-rosdep install --from-paths src --ignore-src -r -y -q
-colcon build --symlink-install
-
-source ~/ros2_ws/install/setup.bash
-rosdep install --from-paths src --ignore-src -r -y -q
-
-rosdep update --include-eol-distros -q
-
-EOF
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 10-ros2-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -356,51 +207,8 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-cat > /usr/bin/setup-socketcan.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-if ! CANIF=`ip link | grep vcan0`; then
-    echo "no vcan adapter found, creating..."
-    ip link add dev vcan0 type vcan
-    ip link set up vcan0
-else
-    echo "vcan adapter found"
-fi
-
-while true; do
-    echo -n "`date -R` "
-    if ! CANIF=`ip link | grep ' can0'`; then
-        echo "no can adapter found"
-    else
-        if echo ${CANIF} | grep -q LOWER_UP; then
-            echo "can adapter is up"
-        else
-            echo "can adapter is down, setting up..."
-            ip link set up can0 txqueuelen 1000 type can bitrate 500000 restart-ms 100
-        fi
-    fi
-    sleep 1
-done
-
-EOF
-
-cat > /lib/systemd/system/setup-socketcan.service  <<EOF
-[Unit]
-Description=Setup SocketCAN Service
-After=multi-user.target
-[Service]
-Type=simple
-Restart=always
-RestartSec=1
-ExecStart=/bin/bash /usr/bin/setup-socketcan.sh
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl start setup-socketcan
-systemctl enable setup-socketcan
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 11-socketcan-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -410,15 +218,8 @@ systemctl enable setup-socketcan
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-apt-get -qq -y install \
-    python3-pyqt5 \
-    pyqt5-dev-tools\
-    qttools5-dev-tools
-
-sudo -H -u ${OSUserName} bash <<EOF
-source ~/.venv-carla/bin/activate
-pip install pyqt5
-EOF
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 12-breeze-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -428,14 +229,8 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-sudo -H -u ${OSUserName} bash <<EOF
-source ~/.venv-carla/bin/activate
-pip install \
-    cantools==37.2.0 \
-    prompt-toolkit==3.0.31 \
-    python-can==4.0.0 \
-    can-isotp==1.8
-EOF
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 13-canigen-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -445,7 +240,8 @@ EOF
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-apt-get -qq -y install firefox
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 14-firefox-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -455,8 +251,8 @@ apt-get -qq -y install firefox
 In the same terminal as a **root** user, execute the following commands:
 
 ```sh
-apt-get -qq -y autoremove
-reboot
+cd $SIMULATOR_CONFIG_DESTINATION/assets/commands
+. 99-finalize-install.sh
 ```
 
 [Bask to the top](#table-of-contents)
@@ -501,7 +297,7 @@ Session: 'demo' (owner:biga type:virtual)
 
 > The Amazon DCV solution doesn't allow USB remotization for the **Logitech G29** and **Logitech G923** device  
 
-In a new terminal as your target user, execute the following commands:
+In a new terminal as your target user (`biga`), execute the following commands:
 
 ```sh
 source ~/.venv-carla/bin/activate

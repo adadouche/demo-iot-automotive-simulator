@@ -9,9 +9,9 @@ apt-get -qq -y install \
 
 mkdir -p /opt/carla-simulator/
 cd /opt/carla-simulator/
-wget -q https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_${CARLA_VERSION}.tar.gz
-tar -xzf /opt/carla-simulator/CARLA_*.tar.gz -C /opt/carla-simulator/
-rm /opt/carla-simulator/CARLA_*.tar.gz
+wget -q -O CARLA.tar.gz https://tiny.carla.org/carla-${CARLA_VERSION//./-}-linux 
+tar -xzf /opt/carla-simulator/CARLA.tar.gz -C /opt/carla-simulator/
+rm /opt/carla-simulator/CARLA.tar.gz
 
 chown -R ${CARLA_OS_USER_NAME}:${CARLA_OS_USER_NAME} /opt/carla-simulator
 

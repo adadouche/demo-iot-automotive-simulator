@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pip3 install crudini
+apt-get -qq -y install crudini
 
 systemctl stop dcvserver
 
