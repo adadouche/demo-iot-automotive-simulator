@@ -1,5 +1,6 @@
 #!/bin/bash
 
+apt-get update -qq -y
 apt-get -qq -y install \
     libomp5 \
     can-utils \
@@ -16,13 +17,14 @@ chown -R ${CARLA_OS_USER_NAME}:${CARLA_OS_USER_NAME} /opt/carla-simulator
 
 sudo -H -u ${CARLA_OS_USER_NAME} bash <<EOF
 source ~/.venv-carla/bin/activate
-python -m pip install --upgrade pip
-python -m pip install carla==${CARLA_VERSION}
-python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt
+python -m pip install --upgrade pip -q -q -q
+python -m pip install carla==${CARLA_VERSION} -q -q -q
+python -m pip install -r /opt/carla-simulator/PythonAPI/examples/requirements.txt -q -q -q
 
 python -m pip install \
     opencv-python \
     evdev \
     boto3 \
-    webcolors
+    webcolors \
+    -q -q -q
 EOF

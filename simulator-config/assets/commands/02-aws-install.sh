@@ -11,3 +11,8 @@ unzip -q -o awscliv2.zip
 ./aws/install --update -b /usr/bin
 
 rm -f /tmp/awscliv2.zip
+
+# curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
+# dpkg -i /tmp/session-manager-plugin.deb
+
+# rm -f /tmp/session-manager-plugin.deb

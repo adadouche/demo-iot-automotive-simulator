@@ -10,7 +10,7 @@ else
     exit 1
 fi
 
-SECRET=$(aws --region '${AWS::Region}' secretsmanager get-secret-value --secret-id '${CARLA_SECRET}' --query 'SecretString')
+SECRET=$(aws --region "${STACK_REGION}" secretsmanager get-secret-value --secret-id "${CARLA_SECRET}" --query 'SecretString')
 OS_PASSWORD=$(echo $SECRET | jq -r '. | fromjson | .password')
 OS_USER=$(echo $SECRET | jq -r '. | fromjson | .username')
 
@@ -33,6 +33,7 @@ $COMMAND_ADD_USR $CREATE_USER_OPTS --comment "Local account for $OS_USER" "$OS_U
 
 mkdir -p /home/$OS_USER
 chown -R $OS_USER:$OS_USER /home/$OS_USER
+chown -R $OS_USER:$OS_USER $SIMULATOR_CONFIG_DESTINATION
 
 echo "$OS_USER:$OS_PASSWORD" | $COMMAND_CHG_PWD
 

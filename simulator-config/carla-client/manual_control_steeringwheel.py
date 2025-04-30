@@ -21,6 +21,8 @@ To find out the values of your steering wheel use jstest-gtk in Ubuntu.
 from __future__ import print_function
 import canigen.canigen
 import os
+import pathlib
+
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 
 # ==============================================================================
@@ -44,14 +46,7 @@ except IndexError:
 # -- vss imports -------------------------------------------------------------------
 # ==============================================================================
 import webcolors
-import boto3
-import json
 from threading import Thread
-
-s3_client = boto3.client('s3')
-
-VSS_BUCKET_NAME="bucket-name-xyz"
-VSS_BUCKET_PREFIX="bucket-prefix-xyz"
 
 def closest_color_name(rgb_color):
     min_colors = {}
@@ -86,11 +81,8 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, Int32, String
 
 if sys.version_info >= (3, 0):
-
     from configparser import ConfigParser
-
 else:
-
     from ConfigParser import RawConfigParser as ConfigParser
 
 try:
@@ -244,10 +236,9 @@ class World(object):
         self.world.on_tick(hud.on_world_tick)
         self.can = canigen.canigen.canigen(
             interface=args.interface,
-            database_filename='canigen/chevy.dbc',
-            obd_config_filename='canigen/obd_config_chevy.json'
+            database_filename=f'{pathlib.Path(__file__).parent.resolve()}/canigen/chevy.dbc',
+            obd_config_filename=f'{pathlib.Path(__file__).parent.resolve()}/canigen/obd_config_chevy.json'
         )
-
 
         self.vss_last_location = self.player.get_location()
         self.vss_last_tick = int(datetime.datetime.now(timezone.utc) .timestamp())
@@ -332,7 +323,7 @@ class World(object):
         self.hud.notification('Weather: %s' % preset[1])
         self.player.get_world().set_weather(preset[0])
 
-    def tick(self, clock):
+    def tick_can(self, clock):
         self.hud.tick(self, clock)
         control = self.player.get_control()
         velocity = self.player.get_velocity()
@@ -367,84 +358,14 @@ class World(object):
             self.vss_trip_speed_max = speed_kph
         if speed_kph > self.vss_session_speed_max:
             self.vss_session_speed_max = speed_kph
-
+            
+    def tick(self, clock):
         # Creates a thread
-        t = Thread(target=self.tick_vss)
+        t = Thread(target=self.tick_can, args=[clock])
 
         # Launches the thread (while not blocking the main execution)
         t.start()
 
-    def tick_vss(self):
-        # will send a vss messsage every seconds to the S3 bucket
-
-        vss_curr_tick_ct = datetime.datetime.now(timezone.utc) 
-        vss_curr_tick_ts = int(vss_curr_tick_ct.timestamp())
-        if vss_curr_tick_ts - int(self.vss_last_tick) > 0:
-            self.vss_last_tick = vss_curr_tick_ts
-
-            velocity = self.player.get_velocity()
-            speed_kph = 3.6 * math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-
-            new_location = self.player.get_location()
-            old_location = self.vss_last_location
-
-            vss_curr_tick_ct = datetime.datetime.now(timezone.utc) 
-            vss_curr_tick_ts = int(vss_curr_tick_ct.timestamp())
-
-            tick_travelled_distance = math.sqrt(( new_location.x - old_location.x )**2 + ( new_location.y - old_location.y )**2)
-            
-            self.vss_trip_distance = self.vss_trip_distance + tick_travelled_distance
-            self.vss_trip_duration = vss_curr_tick_ts - self.vss_trip_start
-            self.vss_trip_speed_avg = (self.vss_trip_distance / 1000) / ((vss_curr_tick_ts - self.vss_trip_start) / 3600) if vss_curr_tick_ts - self.vss_trip_start > 0 else 0.0
-            
-            self.vss_session_distance = self.vss_session_distance + tick_travelled_distance
-            self.vss_session_duration = vss_curr_tick_ts - self.vss_session_start
-            self.vss_session_speed_avg = (self.vss_session_distance / 1000) / ((vss_curr_tick_ts - self.vss_session_start) / 3600) if vss_curr_tick_ts - self.vss_session_start > 0 else 0.0
-
-            self.vss_last_location = self.player.get_location()
-
-            vss_data  = {
-                "acceleration": {
-                    "longitudinal": self.imu_sensor.accelerometer[0],
-                    "lateral": self.imu_sensor.accelerometer[1],
-                    "vertical": self.imu_sensor.accelerometer[2]
-                },
-                "angularvelocity": {
-                    "roll": self.imu_sensor.gyroscope[0],
-                    "pitch": self.imu_sensor.gyroscope[1],
-                    "yaw": self.imu_sensor.gyroscope[2]
-                },
-                "currentlocation": {
-                    "altitude": self.gnss_sensor.alt,
-                    "heading": self.imu_sensor.compass,
-                    # "horizontalaccuracy": 0.19,
-                    "latitude": self.gnss_sensor.lat,
-                    "longitude": self.gnss_sensor.lon,
-                    "timestamp": str(vss_curr_tick_ct),
-                    # "verticalaccuracy": 0.34
-                },
-                "vehicleidentification": {
-                    "brand": self.vss_vehicle_brand,
-                    "model": self.vss_vehicle_model,
-                    "vehicleexteriorcolor": (self.vss_vehicle_exterior_color if self.player_blueprint.has_attribute('color') else None)
-                },
-                "speed": speed_kph,
-                "starttime": self.vss_trip_start, 
-                "ismoving":speed_kph > 1,
-                "tripduration" :  self.vss_trip_duration, # in seconds
-                "traveleddistance": self.vss_trip_distance, # in meters
-                "traveleddistancesincestart": self.vss_session_distance, # in meters
-                "averagespeed": self.vss_trip_speed_avg # in km/h
-            }
-
-            # Convert Dictionary to JSON String
-            data_string = json.dumps(vss_data, default=str)
-
-            s3_client.put_object(
-                Bucket=VSS_BUCKET_NAME, 
-                Key=f'{VSS_BUCKET_PREFIX}/{vss_curr_tick_ts}',
-                Body=data_string
-            )
 
     def render(self, display):
         self.camera_manager.render(display)

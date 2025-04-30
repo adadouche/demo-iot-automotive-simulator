@@ -6,5 +6,6 @@ pip install \
     cantools==37.2.0 \
     prompt-toolkit==3.0.31 \
     python-can==4.0.0 \
-    can-isotp==1.8
+    can-isotp==1.8 \
+    -q -q -q
 EOF

@@ -9,7 +9,7 @@ curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
 export DEBIAN_FRONTEND=noninteractive
-while apt-get upgrade -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
+while apt-get upgrade -qq -y | grep -q "Could not get lock" ; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
 while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do echo "Waiting for other apt-get instances to exit"; sleep 1; done
 apt-get -qq -y update
 
@@ -27,7 +27,8 @@ pip install  \
     empy==3.3.4 \
     catkin_pkg \
     lark \
-    transforms3d 
+    transforms3d \
+    -q -q -q
     
 export CARLA_ROOT=/opt/carla-simulator/
 export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-${CARLA_VERSION}-py3.7-linux-x86_64.egg:$CARLA_ROOT/PythonAPI/carla

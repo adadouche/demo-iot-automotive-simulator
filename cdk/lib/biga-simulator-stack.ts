@@ -8,7 +8,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secret from 'aws-cdk-lib/aws-secretsmanager';
 import * as assets from 'aws-cdk-lib/aws-s3-assets';
-import * as s3d from 'aws-cdk-lib/aws-s3-deployment';
+
+const SIMULATOR_CONFIG_DESTINATION = '/opt/simulator-config';
 
 function pascalCase(input: string): string {
   return _.upperFirst(_.camelCase(input));
@@ -24,7 +25,8 @@ function readAndreplaceWithDict(filePath: string, vars: any): string {
 export interface BigaSimulatorProps extends cdk.StackProps {
   readonly resourcePrefix: string;
 
-  readonly allowedIPs: string;
+  readonly allowedCIDR: string;
+  allowedAvailabilityZone?: string;
 
   readonly bigaMachineImage?: ec2.IMachineImage;
   readonly bigaInstanceType?: string;
@@ -36,7 +38,6 @@ export interface BigaSimulatorProps extends cdk.StackProps {
   readonly carlaVersion?: string;
 
   readonly useMultiCast: boolean;
-  readonly repositoryURL?: string;
 }
 
 const { execSync } = require('child_process');
@@ -45,7 +46,8 @@ const currentIP = `${execSync(cmd).toString().trim()}/32`;
 
 const defaultProps: BigaSimulatorProps = {
   resourcePrefix: 'biga-simulator',
-  allowedIPs: currentIP,
+
+  allowedCIDR: currentIP,
 
   bigaInstanceType: "t4g.micro",
   bigaMachineImage: undefined,
@@ -57,13 +59,14 @@ const defaultProps: BigaSimulatorProps = {
   carlaVersion: '0.9.13',
 
   useMultiCast: true,
-  repositoryURL: "https://github.com/aws4embeddedlinux/demo-iot-automotive-simulator",
 };
 
 export class BigaSimulatorStack extends cdk.Stack {
   constructor(scope: Construct, id: string, _props: BigaSimulatorProps) {
     super(scope, id, { ...defaultProps, ..._props });
 
+    // get the first az from the region in case ze don't provide one
+    defaultProps.allowedAvailabilityZone = cdk.Stack.of(this).availabilityZones[0];
     const props = { ...defaultProps, ..._props };
 
     const carlaValidInstanceTypes = ['g4dn.xlarge',
@@ -105,14 +108,12 @@ export class BigaSimulatorStack extends cdk.Stack {
     var carlaNetworkInterface: ec2.CfnNetworkInterface;
 
     var vpcTransitGateway: ec2.CfnTransitGateway;
-    var vpcTransitGatewayAttachmentPublic: ec2.CfnTransitGatewayAttachment;
-    var vpcTransitGatewayAttachmentPrivate: ec2.CfnTransitGatewayAttachment;
+    var vpcTransitGatewayAttachment: ec2.CfnTransitGatewayAttachment;
     var vpcTransitGatewayDomain: ec2.CfnTransitGatewayMulticastDomain;
-    var vpcTransitGatewayDomainAssociation: ec2.CfnTransitGatewayMulticastDomainAssociation;
     var vpcTransitGatewayGroupMemberCarla: ec2.CfnTransitGatewayMulticastGroupMember;
     var vpcTransitGatewayGroupMemberBiga: ec2.CfnTransitGatewayMulticastGroupMember;
 
-    const fnSubVariables: any = {
+    const envVariables: { [key: string]: string; } = {
       // stack details
       STACK_REGION: cdk.Stack.of(this).region,
       STACK_ID: cdk.Stack.of(this).stackId,
@@ -121,7 +122,6 @@ export class BigaSimulatorStack extends cdk.Stack {
       // props
       CARLA_VERSION: props.carlaVersion!,
       CARLA_OS_USER_NAME: props.carlaOSUserName!,
-      SIMULATOR_REPOSITORY_URL: props.repositoryURL!,
     };
 
     // define the vpc, security group & network interfaces
@@ -130,19 +130,14 @@ export class BigaSimulatorStack extends cdk.Stack {
         vpcName: `${props.resourcePrefix}-vpc`,
         enableDnsHostnames: true,
         enableDnsSupport: true,
-        maxAzs: 1,
         subnetConfiguration: [
           {
             name: `${props.resourcePrefix}-public-subnet`,
             subnetType: ec2.SubnetType.PUBLIC,
             cidrMask: 24,
           },
-          {
-            name: `${props.resourcePrefix}-private-subnet`,
-            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-            cidrMask: 24,
-          }
         ],
+        maxAzs: 2
       });
 
       vpcSecurityGroup = new ec2.SecurityGroup(this, `vpc-sg`, {
@@ -154,8 +149,8 @@ export class BigaSimulatorStack extends cdk.Stack {
       cdk.Tags.of(vpcSecurityGroup).add('Name', `${props.resourcePrefix}-vpc-sg`);
 
       vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4(vpc.vpcCidrBlock), ec2.Port.tcp(22), "SSH from anywhere within the VPC");
-      vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4(props.allowedIPs), ec2.Port.tcp(8443), "DCV access from the outside - tcp");
-      vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4(props.allowedIPs), ec2.Port.udp(8443), "DCV access from the outside - udp");
+      vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4(props.allowedCIDR), ec2.Port.tcp(8443), "DCV access from the outside - tcp");
+      vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4(props.allowedCIDR), ec2.Port.udp(8443), "DCV access from the outside - udp");
     }
 
     // define the carla simulator ec2 instance
@@ -214,7 +209,7 @@ export class BigaSimulatorStack extends cdk.Stack {
         role: carlaInstanceIAMRole,
         instanceProfileName: `${props.resourcePrefix}-carla-instance-iam-instance-profile`
       });
-      carlaNetworkInterface = new ec2.CfnNetworkInterface(this, `carla-instance-eip1`, {
+      carlaNetworkInterface = new ec2.CfnNetworkInterface(this, `carla-instance-eip`, {
         subnetId: vpc.publicSubnets[0].subnetId,
         description: "Simulator Carla Network Interface",
         groupSet: [vpcSecurityGroup.securityGroupId],
@@ -223,7 +218,7 @@ export class BigaSimulatorStack extends cdk.Stack {
           value: `${props.resourcePrefix}-carla-instance-eip`,
         }],
       });
-      carlaInstance = new ec2.CfnInstance(this, `carla-instance1`, {
+      carlaInstance = new ec2.CfnInstance(this, `carla-instance`, {
         tags: [{ key: 'Name', value: `${props.resourcePrefix}-instance-carla` }],
 
         instanceType: props.carlaInstanceType!,
@@ -256,11 +251,11 @@ export class BigaSimulatorStack extends cdk.Stack {
       });
 
       // adding entries for Fn sub
-      fnSubVariables['CARLA_SECRET'] = carlaSecret.secretName;
-      fnSubVariables['CARLA_DESTINATION'] = '/opt/simulator-config';
-      fnSubVariables['S3_BUCKET'] = simulatorConfigS3Asset.s3BucketName;
-      fnSubVariables['S3_OBJECT'] = simulatorConfigS3Asset.s3ObjectKey;
-      fnSubVariables['STACK_RESOURCE_iD'] = carlaInstance.logicalId;/*node.id.replace('-', '').replace('_', '') */
+      envVariables['CARLA_SECRET'] = carlaSecret.secretName;
+      envVariables['SIMULATOR_CONFIG_DESTINATION'] = SIMULATOR_CONFIG_DESTINATION;
+      envVariables['S3_BUCKET'] = simulatorConfigS3Asset.s3BucketName;
+      envVariables['S3_OBJECT'] = simulatorConfigS3Asset.s3ObjectKey;
+      envVariables['STACK_RESOURCE_iD'] = carlaInstance.logicalId;/*node.id.replace('-', '').replace('_', '') */
 
       // adding CloudFormation Init
       {
@@ -269,12 +264,9 @@ export class BigaSimulatorStack extends cdk.Stack {
           shebang: '#!/bin/bash'
         });
         userData.addCommands(...[
-          // cdk.Fn.sub('export STACK_NAME=${STACK_NAME} ', fnSubVariables),
-          // cdk.Fn.sub('export STACK_REGION=${STACK_REGION} ', fnSubVariables),
-          // cdk.Fn.sub('export STACK_RESOURCE_iD=${STACK_RESOURCE_iD} ', fnSubVariables), //{ STACK_RESOURCE_iD: carlaInstance.logicalId /*node.id.replace('-', '').replace('_', '') */ }),
-          'export STACK_NAME=${STACK_NAME}',
-          'export STACK_REGION=${STACK_REGION}',
-          'export STACK_RESOURCE_iD=${STACK_RESOURCE_iD}',
+          'export STACK_NAME="${STACK_NAME}"',
+          'export STACK_REGION="${STACK_REGION}"',
+          'export STACK_RESOURCE_iD="${STACK_RESOURCE_iD}"',
           '',
           'export DEBIAN_FRONTEND=noninteractive',
           '',
@@ -288,7 +280,7 @@ export class BigaSimulatorStack extends cdk.Stack {
               python3-pip
           `,
           '',
-          'python -m pip install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz',
+          'python -m pip install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz -q -q -q',
           '',
           '# Start cfn-init',
           `cfn-init -v --stack $STACK_NAME --resource $STACK_RESOURCE_iD --region $STACK_REGION -c default`,
@@ -306,7 +298,7 @@ export class BigaSimulatorStack extends cdk.Stack {
           'reboot',
         ]);
         carlaInstance.userData = cdk.Fn.base64(
-          cdk.Fn.sub(userData.render(), fnSubVariables)
+          cdk.Fn.sub(userData.render(), envVariables)
         );
         const cloudInitFileOptions = {
           mode: "000755",
@@ -326,38 +318,9 @@ export class BigaSimulatorStack extends cdk.Stack {
 
         const cfnInit = ec2.CloudFormationInit.fromConfigSets({
           configSets: {
-            default: [/*'files',*/ 'commands']
+            default: ['commands']
           },
           configs: {
-            // files: new ec2.InitConfig([
-            //   ec2.InitFile.fromString(
-            //     '/etc/cfn/cfn-hup.conf',
-            //     cdk.Fn.sub(fs.readFileSync(path.join(__dirname, '../../simulator-config/assets/files/cfn-hup.conf'), 'utf-8'), fnSubVariables),
-            //     cloudInitFileOptions
-            //   ),
-            //   ec2.InitFile.fromString(
-            //     '/etc/cfn/hooks.d/cfn-auto-reloader.conf',
-            //     cdk.Fn.sub(fs.readFileSync(path.join(__dirname, '../../simulator-config/assets/files/cfn-auto-reloader.conf'), 'utf-8'), fnSubVariables),
-            //     cloudInitFileOptions
-            //   ),
-            //   ec2.InitFile.fromString(
-            //     '/usr/bin/setup-socketcan.sh',
-            //     cdk.Fn.sub(fs.readFileSync(path.join(__dirname, '../../simulator-config/assets/files/setup-socketcan.sh'), 'utf-8'), fnSubVariables),
-            //     cloudInitFileOptions
-            //   ),
-            //   ec2.InitFile.fromString(
-            //     '/lib/systemd/system/setup-socketcan.service',
-            //     cdk.Fn.sub(fs.readFileSync(path.join(__dirname, '../../simulator-config/assets/files/setup-socketcan.service'), 'utf-8'), fnSubVariables),
-            //     cloudInitFileOptions
-            //   ),
-            //   // ...commandsFiles.map(item =>
-            //   //   ec2.InitFile.fromString(
-            //   //     `/opt/simulator-config/assets/commands/${item.file}`,
-            //   //     cdk.Fn.sub(fs.readFileSync(path.join(__dirname, '../../simulator-config/assets/commands', item.file), 'utf-8'), fnSubVariables),
-            //   //     cloudInitFileOptions
-            //   //   ),
-            //   // )
-            // ]),
             commands: new ec2.InitConfig(
               [
                 ec2.InitCommand.shellCommand(
@@ -371,29 +334,28 @@ export class BigaSimulatorStack extends cdk.Stack {
                     ./aws/install
                     rm awscliv2.zip
 
-                    echo "step: install awscliv2 ok" >> /tmp/my-cloud-int.log
-                    `,
+                    echo "step: install awscliv2 ok" >> /tmp/my-cloud-int.log 
 
-                    cdk.Fn.sub('export CARLA_DESTINATION=${CARLA_DESTINATION} ', fnSubVariables),
-                    cdk.Fn.sub('export S3_BUCKET=${S3_BUCKET} ', fnSubVariables),
-                    cdk.Fn.sub('export S3_OBJECT=${S3_OBJECT} ', fnSubVariables),
-                    `
+                    mkdir -p $SIMULATOR_CONFIG_DESTINATION
+                    aws s3 cp s3://$S3_BUCKET/$S3_OBJECT $SIMULATOR_CONFIG_DESTINATION
+                    chmod +x $SIMULATOR_CONFIG_DESTINATION/$S3_OBJECT
+                    unzip -qq $SIMULATOR_CONFIG_DESTINATION/$S3_OBJECT -d $SIMULATOR_CONFIG_DESTINATION
 
-                    mkdir -p $CARLA_DESTINATION
-                    aws s3 cp s3://$S3_BUCKET/$S3_OBJECT $CARLA_DESTINATION
-                    chmod +x $CARLA_DESTINATION/$S3_OBJECT
-                    unzip -qq $CARLA_DESTINATION/$S3_OBJECT -d $CARLA_DESTINATION
-
-                    echo "step: download s3 s3://$S3_BUCKET/$S3_OBJECT into $CARLA_DESTINATION ok" >> /my-cloud-int.log
+                    echo "step: download s3 s3://$S3_BUCKET/$S3_OBJECT into $SIMULATOR_CONFIG_DESTINATION ok" >> /my-cloud-int.log
                     `
                   ].join('\n'),
                   {
                     ignoreErrors: false,
-                    key: "00-assets"
+                    key: "0-assets",
+                    env: envVariables,
                   }
                 ),
-                ...commandsFiles.map(item => ec2.InitCommand.shellCommand(`/opt/simulator-config/assets/commands/${item.file}`, {
-                  key: item.name, ignoreErrors: false,
+                ...commandsFiles.map(item => ec2.InitCommand.shellCommand([
+                  `. /opt/simulator-config/assets/commands/${item.file}`
+                ].join('\n'), {
+                  key: item.name,
+                  ignoreErrors: false,
+                  env: envVariables,
                 })),
               ]
             ),
@@ -423,7 +385,7 @@ export class BigaSimulatorStack extends cdk.Stack {
     // define the biga simulator ec2 instance
     {
       bigaNetworkInterface = new ec2.CfnNetworkInterface(this, `biga-instance-eip`, {
-        subnetId: vpc.privateSubnets[0].subnetId,
+        subnetId: vpc.publicSubnets[1].subnetId,
         description: "Simulator Biga Network Interface",
         groupSet: [vpcSecurityGroup.securityGroupId],
         tags: [{
@@ -480,45 +442,33 @@ export class BigaSimulatorStack extends cdk.Stack {
           }
         });
 
-        const subnetIds = [...Array.from(vpc.publicSubnets, (x) => x.subnetId)];
-
-        vpcTransitGatewayAttachmentPublic = new ec2.CfnTransitGatewayAttachment(this, `transit-gateway-attachment-pub`, {
+        vpcTransitGatewayAttachment = new ec2.CfnTransitGatewayAttachment(this, `transit-gateway-attachment`, {
           subnetIds: [...Array.from(vpc.publicSubnets, (x) => x.subnetId)],
           transitGatewayId: vpcTransitGateway.attrId,
           vpcId: vpc.vpcId,
         });
 
-        vpcTransitGatewayAttachmentPrivate = new ec2.CfnTransitGatewayAttachment(this, `transit-gateway-attachment-prv`, {
-          subnetIds: [...Array.from(vpc.privateSubnets, (x) => x.subnetId)],
-          transitGatewayId: vpcTransitGateway.attrId,
-          vpcId: vpc.vpcId,
-        });
-
-        vpcTransitGatewayDomainAssociation = new ec2.CfnTransitGatewayMulticastDomainAssociation(this, `transit-gateway-domain-association-pub`, {
-          subnetId: vpc.publicSubnets[0].subnetId,
-          transitGatewayAttachmentId: vpcTransitGatewayAttachmentPublic.attrId,
-          transitGatewayMulticastDomainId: vpcTransitGatewayDomain.attrTransitGatewayMulticastDomainId
-        });
-        vpcTransitGatewayDomainAssociation = new ec2.CfnTransitGatewayMulticastDomainAssociation(this, `transit-gateway-domain-association-prv`, {
-          subnetId: vpc.privateSubnets[0].subnetId,
-          transitGatewayAttachmentId: vpcTransitGatewayAttachmentPrivate.attrId,
-          transitGatewayMulticastDomainId: vpcTransitGatewayDomain.attrTransitGatewayMulticastDomainId
-        });
-
         vpcTransitGatewayGroupMemberCarla = new ec2.CfnTransitGatewayMulticastGroupMember(this, `transit-gateway-group-member-carla`, {
           groupIpAddress: "239.255.0.1",
-          networkInterfaceId: (carlaInstance.networkInterfaces as ec2.CfnInstance.NetworkInterfaceProperty[])[0].networkInterfaceId!, //carlaNetworkInterface.ref,
+          networkInterfaceId: carlaNetworkInterface.ref,
           transitGatewayMulticastDomainId: vpcTransitGatewayDomain.attrTransitGatewayMulticastDomainId
         });
-        vpcTransitGatewayGroupMemberCarla.node.addDependency(vpcTransitGatewayDomainAssociation);
 
         vpcTransitGatewayGroupMemberBiga = new ec2.CfnTransitGatewayMulticastGroupMember(this, `transit-gateway-group-member-biga`, {
           groupIpAddress: "239.255.0.1",
-          networkInterfaceId: (bigaInstance.networkInterfaces as ec2.CfnInstance.NetworkInterfaceProperty[])[0].networkInterfaceId!, //bigaNetworkInterface.ref,
+          networkInterfaceId: bigaNetworkInterface.ref,
           transitGatewayMulticastDomainId: vpcTransitGatewayDomain.attrTransitGatewayMulticastDomainId
         });
-        vpcTransitGatewayGroupMemberBiga.node.addDependency(vpcTransitGatewayDomainAssociation);
 
+        vpc.publicSubnets.map((subnet, index) => {
+          const vpcTransitGatewayDomainAssociation = new ec2.CfnTransitGatewayMulticastDomainAssociation(this, `transit-gateway-domain-association-${index}`, {
+            subnetId: subnet.subnetId,
+            transitGatewayAttachmentId: vpcTransitGatewayAttachment.attrId,
+            transitGatewayMulticastDomainId: vpcTransitGatewayDomain.attrTransitGatewayMulticastDomainId
+          });
+          vpcTransitGatewayGroupMemberCarla.node.addDependency(vpcTransitGatewayDomainAssociation);
+          vpcTransitGatewayGroupMemberBiga.node.addDependency(vpcTransitGatewayDomainAssociation);
+        });
       } else {
         // configure the security group for unicast 
         vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4(vpc.vpcCidrBlock), ec2.Port.allUdp(), "Unicast - Ingress traffic (UDP)");
@@ -526,7 +476,7 @@ export class BigaSimulatorStack extends cdk.Stack {
 
         vpcSecurityGroup.addIngressRule(ec2.Peer.ipv4('0.0.0.0/32'), new ec2.Port({
           protocol: ec2.Protocol.IGMP, stringRepresentation: `*`
-        }), "Multicast - IGMP Querier");
+        }), "Unicast - IGMP Querier");
       }
     }
 
@@ -572,7 +522,7 @@ export class BigaSimulatorStack extends cdk.Stack {
         key: pascalCase(`${props.resourcePrefix}-simulator-allowed-ip`),
         exportName: pascalCase(`${props.resourcePrefix}-simulator-allowed-ip`),
         description: "Allowed IP address to connect to CARLA / Biga via Security Group on port 8443",
-        value: props.allowedIPs,
+        value: props.allowedCIDR,
       });
       new cdk.CfnOutput(this, `simulator-allowed-ip-security-group-id`, {
         key: pascalCase(`${props.resourcePrefix}-simulator-allowed-ip-security-group-id`),
@@ -608,7 +558,7 @@ export class BigaSimulatorStack extends cdk.Stack {
       new cdk.CfnOutput(this, `carla-instance-id-url`, {
         key: pascalCase(`${props.resourcePrefix}-carla-instance-url`),
         exportName: pascalCase(`${props.resourcePrefix}-carla-instance-url`),
-        description: "Carla Simulator EC2 Instance ID",
+        description: "Carla Simulator EC2 Instance Console link",
         value: cdk.Fn.join("", ["https://", props.env?.region!, ".console.aws.amazon.com/ec2/home#InstanceDetails:instanceId=", carlaInstance.attrInstanceId])
       });
       new cdk.CfnOutput(this, `biga-instance-id`, {
@@ -620,7 +570,7 @@ export class BigaSimulatorStack extends cdk.Stack {
       new cdk.CfnOutput(this, `biga-instance-url`, {
         key: pascalCase(`${props.resourcePrefix}-biga-instance-url`),
         exportName: pascalCase(`${props.resourcePrefix}-biga-instance-url`),
-        description: "Biga Simulator EC2 Instance ID",
+        description: "Biga Simulator EC2 Instance Console link",
         value: cdk.Fn.join("", ["https://", props.env?.region!, ".console.aws.amazon.com/ec2/home#InstanceDetails:instanceId=", bigaInstance.attrInstanceId])
       });
 
@@ -628,8 +578,8 @@ export class BigaSimulatorStack extends cdk.Stack {
         key: pascalCase(`${props.resourcePrefix}-carla-instance-public-dns`),
         exportName: pascalCase(`${props.resourcePrefix}-carla-instance-public-dns`),
         description: "Carla Simulator EC2 Instance Public DNS",
-        // value: cdk.Fn.getAtt(bigaInstance.node.id, "PublicDnsName").toString()
-        value: bigaInstance.attrPublicDnsName
+        // value: cdk.Fn.join("", [cdk.Fn.getAtt(carlaInstance.node.id, "PublicDnsName").toString()])
+        value: carlaInstance.attrPublicDnsName
       });
 
       new cdk.CfnOutput(this, `carla-secrets-name`, {
@@ -645,10 +595,16 @@ export class BigaSimulatorStack extends cdk.Stack {
         value: cdk.Fn.join("", ["https://", props.env?.region!, ".console.aws.amazon.com/secretsmanager/secret?name=", carlaSecret.secretName])
       });
 
-      new cdk.CfnOutput(this, `ssm-session-manager-url`, {
-        key: pascalCase(`${props.resourcePrefix}-ssm-session-manager-url`),
-        exportName: pascalCase(`${props.resourcePrefix}-ssm-session-manager-url`),
-        description: "SSM Session Manager access link",
+      new cdk.CfnOutput(this, `carla-ssm-session-manager-url`, {
+        key: pascalCase(`${props.resourcePrefix}-carla-ssm-session-manager-url`),
+        exportName: pascalCase(`${props.resourcePrefix}-carla-ssm-session-manager-url`),
+        description: "SSM Session Manager access link for Carla (use Session Manager)",
+        value: cdk.Fn.join("", ["https://", props.env?.region!, ".console.aws.amazon.com/systems-manager/session-manager/", carlaInstance.attrInstanceId])
+      });
+      new cdk.CfnOutput(this, `biga-ssm-session-manager-url`, {
+        key: pascalCase(`${props.resourcePrefix}-biga-ssm-session-manager-url`),
+        exportName: pascalCase(`${props.resourcePrefix}-biga-ssm-session-manager-url`),
+        description: "SSM Session Manager access link for Biga (use EC2 serial console)",
         value: cdk.Fn.join("", ["https://", props.env?.region!, ".console.aws.amazon.com/systems-manager/session-manager/", bigaInstance.attrInstanceId])
       });
 
@@ -657,14 +613,14 @@ export class BigaSimulatorStack extends cdk.Stack {
         exportName: pascalCase(`${props.resourcePrefix}-nice-dcv-client-web-console-url`),
         description: "NICE DCV Web Access Console URL",
         // value: cdk.Fn.join("", ["https://", cdk.Fn.getAtt(bigaInstance.logicalId, "PublicDnsName").toString(), ":8443"])
-        value: cdk.Fn.join("", ["https://", bigaInstance.attrPublicDnsName, ":8443"])
+        value: cdk.Fn.join("", ["https://", carlaInstance.attrPublicDnsName, ":8443"])
       });
       new cdk.CfnOutput(this, `nice-dcv-client-connection-string1`, {
         key: pascalCase(`${props.resourcePrefix}-nice-dcv-client-connection-string`),
         exportName: pascalCase(`${props.resourcePrefix}-nice-dcv-client-connection-string`),
         description: "NICE DCV Client Connection String",
         // value: cdk.Fn.join("", [cdk.Fn.getAtt(bigaInstance.logicalId, "PublicDnsName").toString(), ":8443"])
-        value: cdk.Fn.join("", [bigaInstance.attrPublicDnsName, ":8443"])
+        value: cdk.Fn.join("", [carlaInstance.attrPublicDnsName, ":8443"])
       });
 
       new cdk.CfnOutput(this, `nice-dcv-download-url`, {
@@ -678,6 +634,12 @@ export class BigaSimulatorStack extends cdk.Stack {
         exportName: pascalCase(`${props.resourcePrefix}-carla-local-path`),
         description: "CARLA installation target path",
         value: "/opt/carla-simulator/"
+      });
+      new cdk.CfnOutput(this, `carla-config-local-path`, {
+        key: pascalCase(`${props.resourcePrefix}-carla-config-local-path`),
+        exportName: pascalCase(`${props.resourcePrefix}-carla-config-local-path`),
+        description: "CARLA Simulator Config target path",
+        value: SIMULATOR_CONFIG_DESTINATION
       });
     }
   }

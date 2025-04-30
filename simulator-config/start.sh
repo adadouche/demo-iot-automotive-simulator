@@ -35,13 +35,13 @@ cleanup() {
             kill -9 $pid > /dev/null 2>&1 # Kills the entire process group
         done
         pkill CarlaUE4
-        killit 'multicast_can_send.sh'
-        killit '/opt/carla-simulator/CarlaUE4'
-        killit 'python3 ./carla-client/manual_control_steeringwheel.py'
-        killit 'python3 /opt/carla-simulator/PythonAPI/examples/generate_traffic.py'
-        killit 'ros2 launch carla_ros_bridge carla_ros_bridge.launch.py'
-        killit 'ros2 launch carla_spawn_objects carla_spawn_objects.launch.py'
-        killit 'python3 ./carla-client/ros2/image_converter.py'
+        killit 'vcan_send'
+        killit 'candump'
+        killit 'CarlaUE4'
+        killit 'carla-client'
+        killit 'carla-simulator'
+        killit 'carla_ros_bridge'
+        killit 'carla_spawn_objects'
         cleanup_in_progress=false
     fi
     if [ "$exit_after_cleanup" = true ] ; then
@@ -63,7 +63,7 @@ main() {
 
     if [[ "$additional_carla_client_args" == *"vcan0"* ]]; then
         log "start vcan multicast forwarding"
-        pid=$(start_process "./multicast_can_send.sh" "$log_dir/socketcan.log")
+        pid=$(start_process "./vcan_send.sh" "$log_dir/socketcan.log")
         pids+=($pid)
         log "  -> process pid   : $pid"
     fi
@@ -80,14 +80,13 @@ main() {
     source ~/ros2_ws/install/setup.bash
 
     log "starting manual_control_steeringwheel"
-    # pid=$(start_process "python3 ./manual_control_steeringwheel.py --sync --rolename ego_vehicle --filter vehicle.tesla.model3 $additional_carla_client_args" "../$log_dir/control.log")
-    pid=$(start_process "python3 ./carla-client/manual_control_steeringwheel.py --sync --rolename ego_vehicle $additional_carla_client_args" "../$log_dir/control.log")
+    pid=$(start_process "python3 ./carla-client/manual_control_steeringwheel.py --sync --rolename ego_vehicle $additional_carla_client_args" "$log_dir/control.log")
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
  
     log "starting generate_traffic"
-    pid=$(start_process "python3 /opt/carla-simulator/PythonAPI/examples/generate_traffic.py -n 15 -w 20" "../$log_dir/traffic_gen.log")
+    pid=$(start_process "python3 /opt/carla-simulator/PythonAPI/examples/generate_traffic.py -n 15 -w 20" "$log_dir/traffic_gen.log")
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
@@ -108,19 +107,19 @@ main() {
     # log "  -> monitored pid : ${pids[*]}"
 
     log "starting image_converter rgb_front"
-    pid=$(start_process "python3 ./carla-client/ros2/image_converter.py --input_topic /carla/ego_vehicle/rgb_front/image --output_topic /carla/ego_vehicle/rgb_front/compressed_image" "../../$log_dir/image_conv1.log")
+    pid=$(start_process "python3 ./carla-client/ros2/image_converter.py --input_topic /carla/ego_vehicle/rgb_front/image --output_topic /carla/ego_vehicle/rgb_front/compressed_image" "$log_dir/image_conv1.log")
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
     
     log "starting image_converter depth_front"
-    pid=$(start_process "python3 ./carla-client/ros2/image_converter.py --input_topic /carla/ego_vehicle/depth_front/image --output_topic /carla/ego_vehicle/depth_front/compressed_image" "../../$log_dir/image_conv2.log")
+    pid=$(start_process "python3 ./carla-client/ros2/image_converter.py --input_topic /carla/ego_vehicle/depth_front/image --output_topic /carla/ego_vehicle/depth_front/compressed_image" "$log_dir/image_conv2.log")
     pids+=($pid)
     log "  -> process pid   : $pid"
     # log "  -> monitored pid : ${pids[*]}"
     
     # log "starting image_converter depth_front"
-    # pid=$(start_process "sudo python3 ./observability/can-stats/generate_stats.py" "./$log_dir/generate_stats.log")
+    # pid=$(start_process "sudo python3 ./observability/can-stats/generate_stats.py" "$log_dir/generate_stats.log")
     # pids+=($pid)
     # log "  -> process pid   : $pid"
     # # log "  -> monitored pid : ${pids[*]}"
